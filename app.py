@@ -30,6 +30,23 @@ if "analyzed_files" not in st.session_state:
 if "interview" not in st.session_state:
     st.session_state.interview = {}
 
+# Nach "Projekt laden" (persist.load_state): Widget-State auf die geladenen
+# Daten setzen, sonst überschreibt alter Widget-State Namen und Zuordnungen.
+# MUSS vor der ersten Widget-Instanziierung laufen (sonst APIException).
+if st.session_state.pop("_widget_sync", False):
+    _iv = st.session_state.interview
+    st.session_state["w_veranlagung"] = (
+        "Zusammenveranlagung (verheiratet)"
+        if _iv.get("zusammenveranlagung", True) else "Einzelveranlagung")
+    _pers = _iv.get("personen", {})
+    st.session_state["w_name_p1"] = _pers.get("P1", "Andre")
+    st.session_state["w_name_p2"] = _pers.get("P2", "Ehepartnerin")
+    _prefixe = ("inh_", "cat_", "amt_", "jahr_", "pjahr_", "sp_", "km_",
+                "at_", "ho_", "tg_", "tv_", "bz_", "sid_", "rel_")
+    for _k in [k for k in st.session_state.keys()
+               if isinstance(k, str) and k.startswith(_prefixe)]:
+        del st.session_state[_k]
+
 # ---------------------------------------------------------------- Sidebar
 with st.sidebar:
     st.title("🧾 Steuer-Assistent")
@@ -56,12 +73,19 @@ with st.sidebar:
                              value=True,
                              help="Zeigt überall verständliche Erklärungen "
                                   "in Alltagssprache an.")
+    st.session_state.setdefault("w_veranlagung",
+                                "Zusammenveranlagung (verheiratet)")
     veranlagung = st.radio("Veranlagung", ["Zusammenveranlagung (verheiratet)",
-                                           "Einzelveranlagung"], index=0)
+                                           "Einzelveranlagung"],
+                           key="w_veranlagung")
     st.session_state.interview["zusammenveranlagung"] = \
         veranlagung.startswith("Zusammen")
-    name_p1 = st.text_input("Person 1", "Andre")
-    name_p2 = st.text_input("Person 2 (Ehepartner/in)", "Ehepartnerin",
+    _pers_default = st.session_state.interview.get("personen", {})
+    st.session_state.setdefault("w_name_p1", _pers_default.get("P1", "Andre"))
+    st.session_state.setdefault("w_name_p2",
+                                _pers_default.get("P2", "Ehepartnerin"))
+    name_p1 = st.text_input("Person 1", key="w_name_p1")
+    name_p2 = st.text_input("Person 2 (Ehepartner/in)", key="w_name_p2",
                             disabled=not veranlagung.startswith("Zusammen"))
     personen = {"P1": name_p1 or "Person 1", "P2": name_p2 or "Person 2"}
     st.session_state.interview["personen"] = personen

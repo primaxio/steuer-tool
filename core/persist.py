@@ -52,4 +52,7 @@ def load_state(ss, raw: bytes | str) -> dict:
                     "verkauf_ts": datetime.fromisoformat(d["verkauf_ts"])})
         for d in data.get("crypto_matched", [])]
     ss.crypto_results = None
+    # Beim nächsten Rerun Widget-State an die geladenen Daten angleichen
+    # (Sidebar-Namen, "Gehört zu"-Auswahl usw.) – siehe Sync-Block in app.py.
+    ss["_widget_sync"] = True
     return data
