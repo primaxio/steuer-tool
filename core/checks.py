@@ -183,6 +183,31 @@ def run_checks(docs: list, cfg: dict, interview: dict) -> list:
             "Krypto-Report vor. Bei Haltefrist < 1 Jahr müssen die Gewinne in "
             "die Anlage SO – bitte Report (z. B. Blockpit/CoinTracking) hochladen.")
 
+    # ---------- Automatik-Bestätigungen & Kontrollwerte ----------
+    for d in _docs_by_cat(docs, "nebenkostenabrechnung"):
+        sh = _num(d["extrahierte_daten"].get("summe_haushaltsnah"))
+        sw = _num(d["extrahierte_daten"].get("summe_handwerker"))
+        if sh or sw:
+            add("hinweis",
+                f"'{d['dateiname']}': § 35a-Posten automatisch übernommen – "
+                f"haushaltsnah {sh:.2f} €, Handwerker {sw:.2f} € "
+                f"(≈ {(sh+sw)*0.2:.0f} € direkte Steuerermäßigung). Bitte "
+                "einmal gegen die Abrechnung gegenlesen.")
+        else:
+            add("frage",
+                f"'{d['dateiname']}': keine § 35a-Posten erkannt – Beleg "
+                "unscharf? Ggf. neu fotografieren oder manuell im "
+                "Spar-Check eintragen.")
+    for d in _docs_by_cat(docs, "broker_steuerbericht"):
+        so_wert = _num(d["extrahierte_daten"].get("so_krypto_gewinn"))
+        if so_wert and interview.get("_crypto"):
+            add("hinweis",
+                f"Kontrollwert {d.get('aussteller') or d['dateiname']}: "
+                f"§ 23-Gewinn lt. Broker {so_wert:.2f} € – vergleiche mit "
+                "der Engine-Rechnung im Krypto-Tab (kleine Abweichungen "
+                "durch Kurse sind normal, große deuten auf fehlende "
+                "Importe hin).")
+
     # ---------- § 35a ----------
     for d in _docs_by_cat(docs, "handwerker_haushaltsnah"):
         daten = d.get("extrahierte_daten", {})

@@ -108,9 +108,13 @@ def build_summary(docs: list, cfg: dict, interview: dict) -> dict:
 
     # ---------- Termingeschäfte / Auslandszinsen (KAP Z. 19/21/24) ----------
     aktive_p = ("P1", "P2") if zusammen else ("P1",)
-    tg = round(sum(_num(interview.get(f"termin_gewinne_{p}")) for p in aktive_p), 2)
-    tv = round(sum(_num(interview.get(f"termin_verluste_{p}")) for p in aktive_p), 2)
-    bz = round(sum(_num(interview.get(f"broker_zinsen_{p}")) for p in aktive_p), 2)
+    berichte = cat(docs, "broker_steuerbericht")
+    tg = round(sum(_num(interview.get(f"termin_gewinne_{p}")) for p in aktive_p)
+               + sum(ed(d, "kap_zeile21_termingewinne") for d in berichte), 2)
+    tv = round(sum(_num(interview.get(f"termin_verluste_{p}")) for p in aktive_p)
+               + sum(ed(d, "kap_zeile24_terminverluste") for d in berichte), 2)
+    bz = round(sum(_num(interview.get(f"broker_zinsen_{p}")) for p in aktive_p)
+               + sum(ed(d, "kap_zeile19_zinsen") for d in berichte), 2)
     if tg or tv or bz:
         kap_block = s["anlagen"].setdefault("KAP", {
             "kapitalertraege": 0.0, "kapitalertragsteuer": 0.0, "soli": 0.0,
@@ -165,16 +169,23 @@ def build_summary(docs: list, cfg: dict, interview: dict) -> dict:
 
     # ---------- § 35a ----------
     h35a = cat(docs, "handwerker_haushaltsnah")
-    if h35a:
-        arbeitskosten = round(sum(
-            ed(d, "arbeitskosten", d.get("betrag_eur")) for d in h35a), 2)
+    nk = cat(docs, "nebenkostenabrechnung")
+    if h35a or nk:
+        arbeitskosten = round(
+            sum(ed(d, "arbeitskosten", d.get("betrag_eur")) for d in h35a)
+            + sum(ed(d, "summe_handwerker") + ed(d, "summe_haushaltsnah")
+                  for d in nk), 2)
         s["anlagen"]["Haushaltsnahe Aufwendungen"] = {
             "arbeitskosten_gesamt": arbeitskosten,
             "ermaessigung_geschaetzt": round(min(
                 arbeitskosten * 0.20, cfg["handwerker_max_ermaessigung"]), 2),
             "belege": [{"datei": d["dateiname"], "firma": d.get("aussteller"),
                         "arbeitskosten": ed(d, "arbeitskosten", d.get("betrag_eur"))}
-                       for d in h35a],
+                       for d in h35a] +
+                      [{"datei": d["dateiname"],
+                        "firma": "NK-Abrechnung (automatisch)",
+                        "arbeitskosten": ed(d, "summe_handwerker")
+                        + ed(d, "summe_haushaltsnah")} for d in nk],
         }
 
     # ---------- Außergewöhnliche Belastungen ----------
@@ -315,7 +326,16 @@ def render_elster_help(s: dict, erklaeren: bool = True) -> str:
         erk("SO")
         namen = {"P1": "Ehegatte/Person 1", "P2": "Ehegatte/Person 2"}
         for p_key, a in so["pro_person"].items():
-            if not (a["veraeusserungen"] or a["rewards_summe"]):
+            a = {**{"veraeusserungen": 0, "rewards_summe": 0.0,
+                    "netto_gewinn": 0.0, "gewinn_brutto": 0.0,
+                    "verluste": 0.0, "gebuehren": 0.0,
+                    "gewinn_steuerfrei_haltefrist": 0.0,
+                    "freigrenze": 1000.0, "unter_freigrenze": True,
+                    "steuerpflichtiger_betrag": a.get(
+                        "steuerpflichtiger_betrag", 0.0),
+                    "rewards_steuerpflichtig": 0.0}, **a}
+            if not (a["veraeusserungen"] or a["rewards_summe"]
+                    or a["steuerpflichtiger_betrag"]):
                 continue
             out += [
                 f"### {namen[p_key]} (eigene Anlage SO!)",

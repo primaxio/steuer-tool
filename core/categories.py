@@ -70,6 +70,25 @@ CATEGORIES = {
             "per Überweisung erfolgt sein."
         ),
     },
+    "nebenkostenabrechnung": {
+        "label": "Nebenkostenabrechnung (§ 35a-Posten automatisch)",
+        "anlage": "Anlage Haushaltsnahe Aufwendungen",
+        "beschreibung": (
+            "Betriebskostenabrechnung des Vermieters. Begünstigte "
+            "Lohnanteile (Treppenhausreinigung, Hausmeister, Gartenpflege, "
+            "Wartungen, Schornsteinfeger, Ablesedienst) werden automatisch "
+            "herausgerechnet."
+        ),
+    },
+    "broker_steuerbericht": {
+        "label": "Broker-Steuerbericht (eToro & Co. – KAP automatisch)",
+        "anlage": "Anlage KAP (Z. 19/21/24) + Kontrollwert Anlage SO",
+        "beschreibung": (
+            "Offizieller Jahressteuerbericht eines Brokers. Termingeschäfte "
+            "und Zinsen fließen automatisch in die Anlage KAP; der "
+            "Krypto-Wert dient als Kontrollwert gegen die FIFO-Engine."
+        ),
+    },
     "krankheitskosten": {
         "label": "Krankheitskosten / außergewöhnliche Belastungen",
         "anlage": "Anlage Außergewöhnliche Belastungen",

@@ -44,6 +44,8 @@ KATEGORIE_ERKLAERUNG = {
     "vorsorge_versicherung": "Versicherungsbeiträge (Haftpflicht, BU, Kranken-/Pflegeversicherung) sind als Vorsorgeaufwand absetzbar – oft vergessen, oft mehrere hundert Euro wert.",
     "spende": "Spenden an gemeinnützige Organisationen senken als Sonderausgaben direkt dein zu versteuerndes Einkommen.",
     "handwerker_haushaltsnah": "20 % der ARBEITSKOSTEN (nicht Material!) von Handwerkern oder Haushaltshilfen zieht das Finanzamt direkt von deiner Steuer ab. Bedingung: per Überweisung bezahlt, niemals bar.",
+    "nebenkostenabrechnung": "Deine Betriebskostenabrechnung enthält versteckte Steuer-Rabatte: 20 % der Lohnkosten für Hausmeister, Treppenhausreinigung & Co. zieht das Finanzamt direkt von der Steuer ab. Das Tool hat die begünstigten Posten automatisch herausgesucht – Grundsteuer, Wasser und Heizöl zählen nicht.",
+    "broker_steuerbericht": "Der offizielle Jahresbericht deines Brokers. Termingeschäfte (CFDs) und Zinsen wurden automatisch in die Anlage KAP übernommen – dort werden sie mit ~26,4 % besteuert, weil Auslandsbroker keine Steuer einbehalten. Der Krypto-Wert dient als Kontrollzahl.",
     "krankheitskosten": "Arzt-, Zahnarzt-, Brillenkosten zählen als außergewöhnliche Belastung – aber erst oberhalb deiner 'zumutbaren Belastung' (einige Prozent des Einkommens). Sammeln lohnt in teuren Jahren.",
     "sonstiges": "Konnte nicht sicher zugeordnet werden – bitte einmal kurz prüfen und die richtige Kategorie wählen.",
 }

@@ -101,10 +101,14 @@ def berechne_veranlagung(docs: list, cfg: dict, interview: dict) -> dict:
     handwerker_belege = sum(_ed(d, "arbeitskosten", d.get("betrag_eur"))
                             for d in docs
                             if d.get("kategorie") == "handwerker_haushaltsnah")
+    nk_handwerker = sum(_ed(d, "summe_handwerker") for d in docs
+                        if d.get("kategorie") == "nebenkostenabrechnung")
+    nk_haushalt = sum(_ed(d, "summe_haushaltsnah") for d in docs
+                      if d.get("kategorie") == "nebenkostenabrechnung")
     erm_handwerker = min(
-        0.20 * (handwerker_belege + spar["h35a_handwerker"]),
+        0.20 * (handwerker_belege + nk_handwerker + spar["h35a_handwerker"]),
         cfg["handwerker_max_ermaessigung"])
-    erm_haushalt = min(0.20 * spar["h35a_haushalt"],
+    erm_haushalt = min(0.20 * (nk_haushalt + spar["h35a_haushalt"]),
                        cfg["haushaltsnahe_max_ermaessigung"])
     erm_minijob = min(0.20 * spar["h35a_minijob"], 510.0)
     erm_partei = min(0.50 * spar["parteispenden"],
@@ -150,9 +154,19 @@ def berechne_veranlagung(docs: list, cfg: dict, interview: dict) -> dict:
              "Sparer-Pauschbetrag)", kap_erstattung)
 
     # ---------- 11) Abgeltungsteuer auf Auslands-KAP (Termingeschäfte, Zinsen)
-    tg = sum(_num(interview.get(f"termin_gewinne_{p}")) for p in aktive)
-    tv = sum(_num(interview.get(f"termin_verluste_{p}")) for p in aktive)
-    bz = sum(_num(interview.get(f"broker_zinsen_{p}")) for p in aktive)
+    berichte = [d for d in docs if d.get("kategorie") == "broker_steuerbericht"]
+    tg = sum(_num(interview.get(f"termin_gewinne_{p}")) for p in aktive) + \
+        sum(_ed(d, "kap_zeile21_termingewinne") for d in berichte)
+    tv = sum(_num(interview.get(f"termin_verluste_{p}")) for p in aktive) + \
+        sum(_ed(d, "kap_zeile24_terminverluste") for d in berichte)
+    bz = sum(_num(interview.get(f"broker_zinsen_{p}")) for p in aktive) + \
+        sum(_ed(d, "kap_zeile19_zinsen") for d in berichte)
+    if berichte:
+        b["warnhinweise"].append(
+            "Broker-Steuerberichte automatisch übernommen (KAP): " +
+            ", ".join(d.get("aussteller") or d["dateiname"] for d in berichte) +
+            ". Achtung: Dieselben Werte NICHT zusätzlich manuell im "
+            "Termingeschäfte-Feld eintragen (Doppelung).")
     kap_zusatz = 0.0
     if tg or tv or bz:
         pb_rest = max(0.0, pb_kap - ertraege)

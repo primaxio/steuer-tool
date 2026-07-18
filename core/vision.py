@@ -60,6 +60,20 @@ Kategoriespezifische Felder für "extrahierte_daten":
 - Werbungskosten: einzelposten als Liste [{{"bezeichnung", "betrag"}}],
   beruflicher_anlass.
 - § 35a: arbeitskosten (nur Lohn/Fahrt!), materialkosten, zahlungsart.
+- Nebenkostenabrechnung: posten_haushaltsnah als Liste
+  [{{"bezeichnung", "betrag"}}] – NUR der Mieteranteil ("Ihr Anteil") von:
+  Treppenhaus-/Gebäudereinigung, Hausmeister, Gartenpflege, Winterdienst,
+  Aufzugswartung, Feuerlöscherwartung, Ablese-/Messdienst (z. B. Brunata);
+  posten_handwerker analog für: Schornsteinfeger, Heizungs-/Gerätewartung,
+  kleine Reparaturen. summe_haushaltsnah und summe_handwerker als Zahlen.
+  NICHT begünstigt (weglassen!): Grundsteuer, Wasser/Abwasser, Müll,
+  Straßenreinigung, Versicherungen, Allgemeinstrom, Brennstoff/Heizöl,
+  Heizkosten selbst. steuerjahr = Jahr des ABRECHNUNGSDATUMS (Wahlrecht
+  des Mieters), nicht der Abrechnungszeitraum.
+- Broker-Steuerbericht (z. B. eToro "Steuerbericht"): kap_zeile19_zinsen
+  (nur Zins-/Kapitalerträge ohne Termingeschäfte), kap_zeile21_termingewinne,
+  kap_zeile24_terminverluste (als positive Zahl), so_krypto_gewinn
+  (Anlage SO Zeile 47/54, Kontrollwert), broker_name, quellensteuer.
 - Spenden: organisation, betrag, zuwendungsbestaetigung_vorhanden (bool).
 
 Regel für "steuerjahr" (WICHTIG für die automatische Sortierung):
@@ -132,7 +146,7 @@ def analyze_document(
 
     response = client.messages.create(
         model=model,
-        max_tokens=2000,
+        max_tokens=4000,
         system=_build_system_prompt(),
         messages=[
             {
