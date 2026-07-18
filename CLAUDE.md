@@ -120,6 +120,30 @@ Finanzamt (ERiC-Zertifizierung nötig) – bewusste Design-Entscheidung.
   Blockpit wich beim eToro-Import ab (BTC-AK) und ließ eToro-CFDs/
   Zinsen aus → Primärquellen bevorzugen.
 
+## Automatik-Kategorien + EZB-Auto-Kurse
+- Zwei "selbstbuchende" Dokumentkategorien (categories.py + vision.py-
+  Prompt): "nebenkostenabrechnung" (Vision extrahiert begünstigte § 35a-
+  Lohnanteile als summe_haushaltsnah/summe_handwerker – Grundsteuer/
+  Wasser/Heizkosten etc. NICHT) und "broker_steuerbericht"
+  (kap_zeile19_zinsen, kap_zeile21_termingewinne,
+  kap_zeile24_terminverluste, so_krypto_gewinn, broker_name).
+- Beide fließen AUTOMATISCH in veranlagung.py (NK-Summen in die 20 %-
+  § 35a-Ermäßigung; Broker-Werte ADDITIV zu den manuellen tg/tv/bz-
+  Interview-Feldern → Warnhinweis gegen Doppel-Eingabe) und in
+  elster_export.build_summary (KAP-Block + § 35a-Block, Beleg-Label
+  "NK-Abrechnung (automatisch)"). checks.py bestätigt je Doc per
+  "hinweis" die übernommenen Summen bzw. den Kontrollwert-Abgleich.
+- WICHTIG: broker so_krypto_gewinn ist NUR Kontrollwert gegen die
+  FIFO-Engine – er geht NIE in die Rechnung ein (sonst Doppelerfassung
+  mit Anlage SO aus dem Krypto-Tab).
+- render_elster_help füllt fehlende SO-Keys defensiv mit Defaults auf
+  (Kontrollwert ohne vollständige Krypto-Daten darf keinen KeyError
+  werfen).
+- FxTable.from_ecb_online (crypto_parsers.py): lädt eurofxref-hist.zip
+  von der EZB, 24h-Datei-Cache /tmp/ezb_kurse.csv; crypto_ui lädt beim
+  ersten Tab-Aufruf automatisch (ss["_fx"]), bei Fehlschlag Fallback:
+  manueller CSV-Upload + Notfall-Kurs-Eingabe (1,08).
+
 ## Coinbase-Realdaten-Erkenntnisse (07/2026, WICHTIG)
 - run_fifo: (1) Sortierung tagesweise – Zugänge vor Abgängen (Settlement-
   Timing in Exporten!), (2) transfer_out bucht Lots STEUERNEUTRAL aus

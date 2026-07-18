@@ -38,21 +38,40 @@ def render_crypto_tab(cfg: dict, api_key: str, model: str,
     e = lambda v: f"{v:,.2f} €".replace(",", "X").replace(".", ",").replace("X", ".")
 
     st.subheader("Krypto-Import (eToro · Coinbase · Base · generisch)")
-    c1, c2, c3 = st.columns(3)
+    c1, c2 = st.columns([1, 2])
     with c1:
         inhaber = st.selectbox("Depot-Inhaber", ["P1", "P2"],
                                format_func=lambda k: personen.get(k, k))
     with c2:
-        fx_file = st.file_uploader(
-            "EZB-Kurse (eurofxref-hist.csv)", type=["csv"],
-            help="Für USD-Exporte (eToro/Coinbase-USD): tagesgenaue "
-                 "Umrechnung. Download: ecb.europa.eu → Euro reference rates")
-    with c3:
-        fallback_rate = st.number_input(
-            "Fallback USD/EUR-Kurs", 0.5, 2.0, 1.08, 0.01,
-            help="Wird nur genutzt, wenn keine EZB-Datei geladen ist "
-                 "(ungenauer – Finanzamt erwartet tagesgenaue Kurse).")
-    fx = FxTable.from_file(fx_file) if fx_file else None
+        if "_fx" not in ss:
+            try:
+                with st.spinner("Lade EZB-Tageskurse …"):
+                    ss["_fx"] = FxTable.from_ecb_online()
+            except Exception as exc:  # noqa: BLE001
+                ss["_fx"] = None
+                ss["_fx_fehler"] = str(exc)
+        fx = ss.get("_fx")
+        if fx and fx.rates:
+            neuester = max(fx.rates)
+            st.success(f"💱 EZB-Tageskurse automatisch geladen "
+                       f"({len(fx.rates):,} Handelstage, aktuellster: "
+                       f"{neuester:%d.%m.%Y}) – USD wird tagesgenau "
+                       "umgerechnet.".replace(",", "."))
+        else:
+            st.warning("EZB-Kurse konnten nicht automatisch geladen werden"
+                       + (f" ({ss.get('_fx_fehler', '')[:60]})"
+                          if ss.get("_fx_fehler") else "") +
+                       " – Datei manuell laden oder Notfall-Kurs nutzen.")
+    fallback_rate = 1.08
+    if not (ss.get("_fx") and ss["_fx"].rates):
+        f1, f2 = st.columns(2)
+        fx_file = f1.file_uploader("eurofxref-hist.csv (manuell)", type=None)
+        fallback_rate = f2.number_input("Notfall USD/EUR-Kurs", 0.5, 2.0,
+                                        1.08, 0.01)
+        if fx_file:
+            ss["_fx"] = FxTable.from_file(fx_file)
+            st.rerun()
+    fx = ss.get("_fx")
 
     with st.expander("🔄 Automatischer Abruf per API (Coinbase & Base) – "
                      "Blockpit-Style"):

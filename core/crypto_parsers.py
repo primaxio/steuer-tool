@@ -41,6 +41,28 @@ class FxTable:
     def from_file(cls, file) -> "FxTable":
         return cls(pd.read_csv(file))
 
+    ECB_URL = "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-hist.zip"
+
+    @classmethod
+    def from_ecb_online(cls, cache_pfad: str = "/tmp/ezb_kurse.csv",
+                        max_alter_stunden: float = 24.0) -> "FxTable":
+        import io as _io
+        import os
+        import time
+        import zipfile
+        import requests
+        if os.path.exists(cache_pfad) and \
+                time.time() - os.path.getmtime(cache_pfad) < \
+                max_alter_stunden * 3600:
+            return cls(pd.read_csv(cache_pfad))
+        r = requests.get(cls.ECB_URL, timeout=30)
+        r.raise_for_status()
+        zf = zipfile.ZipFile(_io.BytesIO(r.content))
+        name = next(n for n in zf.namelist() if n.endswith(".csv"))
+        df = pd.read_csv(zf.open(name))
+        df.to_csv(cache_pfad, index=False)
+        return cls(df)
+
     def usd_to_eur(self, amount: float, when: datetime,
                    fallback_rate: float | None = None) -> float:
         d = when.date() if isinstance(when, datetime) else when
