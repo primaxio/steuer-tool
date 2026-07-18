@@ -208,6 +208,24 @@ def run_checks(docs: list, cfg: dict, interview: dict) -> list:
                 "durch Kurse sind normal, große deuten auf fehlende "
                 "Importe hin).")
 
+    # ---------- Doppelerfassungs-Wächter (Scan vs. Spar-Check) ----------
+    spar = interview.get("spar", {})
+    if _docs_by_cat(docs, "nebenkostenabrechnung") and \
+            spar.get("nk_abrechnung", {}).get("aktiv"):
+        add("fehler",
+            "DOPPELERFASSUNG: Die Nebenkostenabrechnung wurde gescannt UND "
+            "im Spar-Check angekreuzt – beide Beträge würden addiert! "
+            "Bitte den Spar-Check-Haken 'Nebenkostenabrechnung' entfernen "
+            "(der Scan übernimmt automatisch).")
+    if _docs_by_cat(docs, "broker_steuerbericht") and any(
+            _num(interview.get(f"termin_gewinne_{p}")) or
+            _num(interview.get(f"broker_zinsen_{p}")) for p in ("P1", "P2")):
+        add("warnung",
+            "Mögliche Doppelerfassung KAP: Ein Broker-Steuerbericht wurde "
+            "gescannt UND manuelle Termingeschäfte-/Zins-Werte sind "
+            "eingetragen. Falls beides derselbe Broker ist: manuelle Felder "
+            "auf 0 setzen – der Scan übernimmt automatisch.")
+
     # ---------- § 35a ----------
     for d in _docs_by_cat(docs, "handwerker_haushaltsnah"):
         daten = d.get("extrahierte_daten", {})
