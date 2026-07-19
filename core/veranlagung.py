@@ -65,32 +65,56 @@ def berechne_veranlagung(docs: list, cfg: dict, interview: dict) -> dict:
             summe_einkuenfte += gewinn
 
     # ---------- 2) Sonstige Einkünfte (Krypto § 23 + § 22 Nr. 3)
-    krypto_stpfl = sum(
-        a.get("steuerpflichtiger_betrag", 0) + a.get("rewards_steuerpflichtig", 0)
-        for a in crypto["pro_person"].values())
+    krypto_23 = sum(a.get("steuerpflichtiger_betrag", 0)
+                    for a in crypto["pro_person"].values())
+    krypto_rewards = sum(a.get("rewards_steuerpflichtig", 0)
+                         for a in crypto["pro_person"].values())
     if not crypto["pro_person"]:
         # Kein FIFO-Engine-Ergebnis vorhanden (Krypto-Tab nicht genutzt) –
         # Fallback auf hochgeladene krypto_report-Dokumente, sonst würde
         # dieser Gewinn in der Schätzung fehlen (steht aber in build_summary!).
         krypto_docs = [d for d in docs if d.get("kategorie") == "krypto_report"]
-        krypto_stpfl = sum(_ed(d, "gewinn_steuerpflichtig", d.get("betrag_eur"))
-                           for d in krypto_docs)
-        if krypto_stpfl:
+        krypto_23 = sum(_ed(d, "gewinn_steuerpflichtig", d.get("betrag_eur"))
+                        for d in krypto_docs)
+        krypto_rewards = 0.0
+        if krypto_23:
             b["warnhinweise"].append(
                 "Krypto-Report-Dokument(e) ohne Nutzung des Krypto-Tabs "
                 "(FIFO-Engine) erkannt – Gewinn wurde als grobe Schätzung "
                 "aus dem Beleg übernommen. Für eine genaue, walletbezogene "
                 "FIFO-Berechnung den Krypto-Tab nutzen.")
-    if krypto_stpfl:
-        step("+ Steuerpflichtige Krypto-Einkünfte (Anlage SO)", krypto_stpfl)
+    if krypto_23:
+        step("+ Steuerpflichtiger Krypto-Gewinn § 23 (vor Verlustvortrag)",
+             krypto_23)
+    # Verlustvortrag § 23 EStG: NUR mit § 23-Gewinnen verrechenbar, NICHT
+    # mit § 22 Nr. 3 (Rewards/Staking) – unterschiedliche Einkunftsarten.
+    verlustvortrag_23 = _num(interview.get("verlustvortrag_23"))
+    vortrag_verrechnet = min(verlustvortrag_23, krypto_23) if krypto_23 > 0 else 0.0
+    if vortrag_verrechnet:
+        step("− Verlustvortrag § 23 aus Vorjahren verrechnet",
+             -vortrag_verrechnet)
+        rest = round(verlustvortrag_23 - vortrag_verrechnet, 2)
+        if rest:
+            b["warnhinweise"].append(
+                f"Verlustvortrag § 23: {rest:.2f} € bleiben nach "
+                "Verrechnung für Folgejahre vortragsfähig (Feststellungs-"
+                "bescheid beachten).")
+    krypto_23_netto = max(0.0, krypto_23 - verlustvortrag_23)
+    if krypto_rewards:
+        step("+ Steuerpflichtige Rewards/Staking (§ 22 Nr. 3)", krypto_rewards)
+    krypto_stpfl = krypto_23_netto + krypto_rewards
     summe_einkuenfte += krypto_stpfl
     step("= Summe der Einkünfte", summe_einkuenfte)
 
     # ---------- 3) Vorsorgeaufwendungen (aus Lohnsteuerbescheinigungen)
     vorsorge = sum(_ed(d, "rv_arbeitnehmer") + _ed(d, "kv_beitraege")
                    + _ed(d, "pv_beitraege") for d in lsb)
-    if vorsorge == 0:
-        # Fallback: grobe Näherung, falls SV-Zeilen nicht extrahiert wurden
+    if vorsorge == 0 and lsb:
+        # Fallback: grobe Näherung, NUR wenn Lohnsteuerbescheinigungen
+        # vorliegen, aber die SV-Zeilen darin nicht extrahiert wurden (nicht
+        # wenn schlicht noch gar keine LSB hochgeladen ist – das deckt schon
+        # der "fehlt LSB"-Fehler in checks.py ab, doppelte Warnung wäre
+        # irreführend).
         brutto_ges = sum(_ed(d, "bruttoarbeitslohn", d.get("betrag_eur"))
                          for d in lsb)
         vorsorge = round(brutto_ges * 0.19, 2)
@@ -104,9 +128,14 @@ def berechne_veranlagung(docs: list, cfg: dict, interview: dict) -> dict:
         "bereits überschritten) – trotzdem eintragen, schadet nie.")
 
     # ---------- 4) Sonderausgaben
+    # Bewusst NICHT nach inhaber gefiltert: Sonderausgaben, agB und KAP-
+    # Erträge werden bei Zusammenveranlagung als GEMEINSAMER Topf der
+    # Ehegatten veranlagt (eine gemeinsame Steuernummer/Erklärung) – anders
+    # als Anlage N/SO, die PRO PERSON eigene Pausch-/Freibeträge haben.
     spenden_belege = sum(_num(d.get("betrag_eur")) for d in docs
                          if d.get("kategorie") == "spende")
-    kist_gezahlt = sum(_ed(d, "kirchensteuer") for d in lsb)
+    kist_gezahlt = sum(_ed(d, "kirchensteuer") for d in lsb) + \
+        sum(_ed(d, "kirchensteuer") for d in uebergangsbeihilfe_docs)
     sa = max(cfg["sonderausgaben_pauschbetrag"] * len(aktive),
              spenden_belege + spar["sa"] + kist_gezahlt)
     step("− Sonderausgaben (Spenden, Kirchensteuer, Betreuung …)", -sa)
@@ -167,15 +196,31 @@ def berechne_veranlagung(docs: list, cfg: dict, interview: dict) -> dict:
         if interview.get("kirchensteuerpflichtig") else 0.0
 
     # ---------- 9) Bereits gezahlt
-    lst_gezahlt = sum(_ed(d, "lohnsteuer") for d in lsb)
-    soli_gezahlt = sum(_ed(d, "soli") for d in lsb)
+    lst_gezahlt = sum(_ed(d, "lohnsteuer") for d in lsb) + \
+        sum(_ed(d, "lohnsteuer") for d in uebergangsbeihilfe_docs)
+    soli_gezahlt = sum(_ed(d, "soli") for d in lsb) + \
+        sum(_ed(d, "soli") for d in uebergangsbeihilfe_docs)
     step("Bereits gezahlte Lohnsteuer", lst_gezahlt)
 
     # ---------- 10) KAP-Erstattungspotenzial (Sparer-Pauschbetrag)
     kap_docs = [d for d in docs
                 if d.get("kategorie") == "steuerbescheinigung_bank"]
-    ertraege = sum(_ed(d, "kapitalertraege_zeile7", d.get("betrag_eur"))
-                   for d in kap_docs)
+    ertraege_brutto = sum(_ed(d, "kapitalertraege_zeile7", d.get("betrag_eur"))
+                          for d in kap_docs)
+    # Verlustvortrag KAP (Aktien + sonstige): vereinfachend gegen die
+    # blendete Kapitalertrags-Summe verrechnet. Real gibt es getrennte
+    # Verlusttöpfe (Aktien-Verlusttopf nur mit Aktiengewinnen verrechenbar,
+    # § 20 Abs. 6 S. 4 EStG) – ohne Aufschlüsselung Aktien/sonstige in den
+    # Bank-Bescheinigungen ist die feinere Trennung hier nicht abbildbar.
+    verlustvortrag_kap = (_num(interview.get("verlustvortrag_kap_aktien"))
+                          + _num(interview.get("verlustvortrag_kap_sonstige")))
+    ertraege = max(0.0, ertraege_brutto - verlustvortrag_kap)
+    if verlustvortrag_kap and ertraege_brutto:
+        b["warnhinweise"].append(
+            "Verlustvortrag KAP wurde vereinfacht gegen die gesamten "
+            "Kapitalerträge verrechnet (ohne Trennung Aktien-Verlusttopf "
+            "vs. sonstige Verluste) – bei größeren Beträgen mit dem "
+            "Steuerbescheid abgleichen.")
     fsa = sum(_ed(d, "in_anspruch_genommener_freistellungsauftrag")
               for d in kap_docs)
     pb_kap = cfg["sparer_pauschbetrag"] * len(aktive)

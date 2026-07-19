@@ -53,6 +53,9 @@ Kategoriespezifische Felder für "extrahierte_daten":
   rv_arbeitnehmer (Z. 23a), kv_beitraege (Z. 25), pv_beitraege (Z. 26),
   av_beitraege (Z. 27). Erkenne am Aussteller (BVA, Bundeswehr,
   Dienstleistungszentrum), ob es die Bundeswehr-Bescheinigung ist.
+- Übergangsbeihilfe: lohnsteuer, soli, kirchensteuer (falls auf der
+  Bescheinigung/Abrechnung einbehalten ausgewiesen, sonst null – NICHT
+  raten). Diese Beträge zählen wie normale Lohnsteuervorauszahlung.
 - Bank-Steuerbescheinigung: kapitalertraege_zeile7, kapitalertragsteuer, soli,
   kirchensteuer, in_anspruch_genommener_freistellungsauftrag,
   verlust_aktien, verlust_sonstige, auslaendische_quellensteuer.

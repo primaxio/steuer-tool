@@ -8,7 +8,8 @@ import streamlit as st
 
 from . import categories as cat
 from .erklaerungen import KATEGORIE_ERKLAERUNG, klaerungs_chat
-from .jahr_zuordnung import bestimme_steuerjahr, docs_im_jahr, jahres_uebersicht
+from .jahr_zuordnung import (bestimme_steuerjahr, docs_im_jahr,
+                             ist_im_jahr, jahres_uebersicht)
 from .vision import SUPPORTED_IMAGE_TYPES, analyze_document
 
 
@@ -160,7 +161,7 @@ def render_dokumente_tab(cfg: dict, api_key: str, model: str,
         st.divider()
         docs_aktuell = docs_im_jahr(st.session_state.docs, cfg["jahr"])
         docs_andere = [d for d in st.session_state.docs
-                       if d not in docs_aktuell]
+                       if not ist_im_jahr(d, cfg["jahr"])]
         st.subheader(f"Belege für Steuerjahr {cfg['jahr']} "
                      f"({len(docs_aktuell)})")
         if docs_andere:
@@ -170,8 +171,7 @@ def render_dokumente_tab(cfg: dict, api_key: str, model: str,
                 if j) + " – in der Seitenleiste das Steuerjahr wechseln, "
                 "um sie zu bearbeiten. Gespeichert bleiben alle.")
         for i, d in enumerate(st.session_state.docs):
-            im_jahr = d in docs_aktuell
-            if not im_jahr:
+            if not ist_im_jahr(d, cfg["jahr"]):
                 continue
             conf = d.get("confidence") or 0
             icon = "🟢" if conf >= 0.85 else ("🟡" if conf >= 0.7 else "🔴")
@@ -250,7 +250,7 @@ def render_dokumente_tab(cfg: dict, api_key: str, model: str,
             with st.expander(f"📦 Geparkte Belege anderer Jahre "
                              f"({len(docs_andere)})"):
                 for i, d in enumerate(st.session_state.docs):
-                    if d in docs_andere:
+                    if not ist_im_jahr(d, cfg["jahr"]):
                         c1, c2 = st.columns([3, 1])
                         c1.markdown(
                             f"`{d['dateiname']}` – "

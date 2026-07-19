@@ -55,7 +55,8 @@ TAX_YEARS = {
         "gwg_grenze_brutto": 952,
         "freigrenze_sonstige_leistungen": 256,    # § 22 Nr. 3 (Staking/Rewards)
         "kinderbetreuung": {"anteil_prozent": 80, "max": 4800},  # ab 2025 erhöht
-        "abgabefrist_hinweis": "31.07.2026 (ohne Berater; mit Berater 30.04.2027)",
+        "abgabefrist_hinweis": "31.07.2026 (ohne Berater; mit Berater 01.03.2027 – "
+                               "dauerhafte Fristverkürzung auf Ende Februar ab VZ 2025)",
         "abgabefrist_datum": "2026-07-31",
         "soli_freigrenze_einzel": 19950, "soli_freigrenze_zusammen": 39900,
         "kleinunternehmer_grenze_vorjahr": 25000,   # § 19 UStG, ab 2025 (JStG 2024)

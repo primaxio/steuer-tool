@@ -45,7 +45,7 @@ def test_krypto_report_fallback_in_schaetzung():
     interview = {"zusammenveranlagung": False}
     v = berechne_veranlagung(docs, CFG, interview)
     krypto_step = next(s for s in v["schritte"]
-                       if "Krypto-Einkünfte" in s["text"])
+                       if "Krypto-Gewinn § 23" in s["text"])
     assert krypto_step["wert"] == 2000, krypto_step
     assert any("Krypto-Report-Dokument" in w for w in v["warnhinweise"])
     print("✅ krypto_report-Fallback fließt in die Steuerschätzung ein "
@@ -57,7 +57,7 @@ def test_krypto_report_fallback_in_schaetzung():
         "P1": {"steuerpflichtiger_betrag": 500, "rewards_steuerpflichtig": 0}}}
     v2 = berechne_veranlagung(docs, CFG, interview)
     krypto_step2 = next(s for s in v2["schritte"]
-                        if "Krypto-Einkünfte" in s["text"])
+                        if "Krypto-Gewinn § 23" in s["text"])
     assert krypto_step2["wert"] == 500, \
         f"Doppelzählung! Erwartet 500 (nur FIFO-Engine): {krypto_step2}"
     print("✅ Kein Doppelzählung: FIFO-Engine-Daten haben Vorrang vor "

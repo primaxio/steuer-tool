@@ -92,7 +92,10 @@ def convert(amount: float, ccy: str, when: datetime,
     raise ValueError(f"Währung {ccy} nicht unterstützt.")
 
 
-def _clean_num(v) -> float:
+def _clean_num_signed(v) -> float:
+    """Wie _clean_num, aber OHNE abs() – für Werte, bei denen das
+    Vorzeichen zählt (z. B. eToro-Gewinn/Verlust). Erkennt sowohl
+    "1.234,56" (de) als auch "1,234.56" (en) über den LETZTEN Trenner."""
     if v is None or (isinstance(v, float) and pd.isna(v)):
         return 0.0
     s = re.sub(r"[^\d,.\-]", "", str(v))
@@ -102,9 +105,13 @@ def _clean_num(v) -> float:
     elif "," in s:
         s = s.replace(",", ".")
     try:
-        return abs(float(s))
+        return float(s)
     except ValueError:
         return 0.0
+
+
+def _clean_num(v) -> float:
+    return abs(_clean_num_signed(v))
 
 
 # ------------------------------------------------------------------ Detection
@@ -242,10 +249,11 @@ def parse_etoro(file_bytes: bytes, inhaber: str,
         if pd.isna(open_ts) or pd.isna(close_ts):
             continue
         invest_usd = _clean_num(g(row, "amount"))
-        profit_usd = float(str(g(row, "profit", default=0)).replace(",", ".")
-                           if not isinstance(g(row, "profit", default=0),
-                                             (int, float))
-                           else g(row, "profit", default=0) or 0)
+        # Vorzeichen MUSS erhalten bleiben (Verlust = negativ) – _clean_num
+        # würde mit abs() einen Verlust fälschlich als Gewinn behandeln.
+        profit_raw = g(row, "profit", default=0)
+        profit_usd = float(profit_raw) if isinstance(profit_raw, (int, float)) \
+            else _clean_num_signed(profit_raw)
         fees_usd = _clean_num(g(row, "spread", default=0)) + \
             _clean_num(g(row, "rollover", default=0))
         units = _clean_num(g(row, "units", default=0))

@@ -83,7 +83,9 @@ def build_summary(docs: list, cfg: dict, interview: dict) -> dict:
     }
     uebergangsbeihilfe = [{
         "datei": d["dateiname"], "inhaber": d.get("inhaber", "P1"),
-        "betrag": _num(d.get("betrag_eur"))}
+        "betrag": _num(d.get("betrag_eur")),
+        "lohnsteuer": ed(d, "lohnsteuer"), "soli": ed(d, "soli"),
+        "kirchensteuer": ed(d, "kirchensteuer")}
         for d in cat(docs, "uebergangsbeihilfe")]
     s["anlagen"]["N"] = {
         "arbeitsverhaeltnisse": n_eintraege,
@@ -92,6 +94,9 @@ def build_summary(docs: list, cfg: dict, interview: dict) -> dict:
     }
 
     # ---------- Anlage KAP ----------
+    # Bewusst NICHT nach inhaber gefiltert – wie Sonderausgaben/agB gehört
+    # KAP bei Zusammenveranlagung in einen GEMEINSAMEN Topf (anders als
+    # Anlage N/SO mit eigenen Pausch-/Freibeträgen pro Person).
     kap_docs = cat(docs, "steuerbescheinigung_bank")
     if kap_docs:
         s["anlagen"]["KAP"] = {
@@ -314,6 +319,12 @@ def render_elster_help(s: dict, erklaeren: bool = True) -> str:
                 out.append(f"- `{ub['datei']}` ({ub['inhaber']}): "
                            f"{e(ub['betrag'])} – als zusätzlicher Arbeitslohn "
                            "in die Schätzung eingerechnet (voll versteuert).")
+                if ub["lohnsteuer"] or ub["soli"] or ub["kirchensteuer"]:
+                    out.append(
+                        f"  - Bereits einbehalten: Lohnsteuer "
+                        f"{e(ub['lohnsteuer'])}, Soli {e(ub['soli'])}, "
+                        f"Kirchensteuer {e(ub['kirchensteuer'])} "
+                        "(in der Schätzung als bereits gezahlt berücksichtigt).")
             out += [
                 "- ⚠️ **Fünftelregelung (§ 34 EStG) prüfen!** Bei Vergütung für "
                 "mehrjährige Tätigkeit kann die ermäßigte Besteuerung viel "
