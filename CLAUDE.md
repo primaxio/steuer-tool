@@ -76,6 +76,28 @@ Finanzamt (ERiC-Zertifizierung nötig) – bewusste Design-Entscheidung.
 - Tab-Reihenfolge: Dokumente · Krypto · Fragebogen · Spar-Check ·
   Ergebnis&ELSTER · Verstehen.
 
+## Einfacher Modus (geführter Wizard)
+- `core/wizard.py` – render_wizard(): lineare 5-Schritte-Führung (Start ·
+  Belege · Fragen · Ergebnis · Fertig) für Steuer-Laien, die sich in der
+  Tab-Ansicht überfordert fühlen. Sidebar-Radio "Wie möchtest du arbeiten?"
+  schaltet zwischen Einfach (Wizard) und Experte (alle 6 Tabs) um; im
+  Einfach-Modus rendert app.py NUR den Wizard (st.stop() vor den Tabs).
+  State: st.session_state.wizard_step (Index 0–4).
+- Wizard nutzt dieselben Kernfunktionen wie die Tabs (run_checks,
+  berechne_veranlagung, build_summary, render_crypto_tab) – KEINE eigene
+  Business-Logik, nur reduzierte Feldauswahl (4 Ja/Nein-Fragen statt
+  Stammdaten/Verlustvorträge/Fahrtkosten – diese bleiben im Experten-Modus).
+  Krypto-Erfassung erscheint als eingebetteter Expander in Schritt "Fragen",
+  wenn "Krypto verkauft?" mit Ja beantwortet wird (kein eigener Wizard-Schritt,
+  damit die Schrittzahl konstant bleibt).
+- `core/dokumente_ui.py` – render_dokumente_tab(): Beleg-Upload/-Analyse/
+  -Korrektur aus dem alten Tab 1 extrahiert, damit Experten-Tab und
+  Wizard-Schritt "Belege" dieselbe Logik nutzen (keine Duplikate).
+  `core/jahr_zuordnung.docs_im_jahr()` ist der gemeinsame Jahres-Filter.
+- Sidebar im Einfach-Modus reduziert: Jahr-Wahl/Pauschbeträge und
+  Projektstand-Speichern/Laden sind in Expander eingeklappt (im
+  Experten-Modus standardmäßig ausgeklappt).
+
 ## Belege-Eingang mit Jahres-Sortierung
 - `core/jahr_zuordnung.py` – bestimme_steuerjahr(): Claude-Feld
   "steuerjahr" → Jahreszahlen im Datum (Zeitraum: Endjahr) → None
