@@ -7,18 +7,17 @@ import os
 
 import streamlit as st
 
-from core import categories as cat
 from core.checks import run_checks
+from core.dokumente_ui import render_dokumente_tab
 from core.elster_export import build_summary, export_json, render_elster_help
 from core.tax_config import DEFAULT_YEAR, TAX_YEARS, VISION_MODEL, get_config
 from core.crypto_ui import render_crypto_tab, _st_init
-from core.erklaerungen import (GLOSSAR, KATEGORIE_ERKLAERUNG, STEUER_101,
-                               frag_steuerberater)
-from core.jahr_zuordnung import bestimme_steuerjahr, jahres_uebersicht
+from core.erklaerungen import GLOSSAR, STEUER_101, frag_steuerberater
+from core.jahr_zuordnung import docs_im_jahr, jahres_uebersicht
 from core.persist import load_state, save_state
 from core.sparcheck import render_sparcheck
 from core.veranlagung import berechne_veranlagung
-from core.vision import SUPPORTED_IMAGE_TYPES, analyze_document
+from core.wizard import render_wizard
 
 st.set_page_config(page_title="Steuer-Assistent", page_icon="🧾", layout="wide")
 
@@ -52,13 +51,24 @@ with st.sidebar:
     st.title("🧾 Steuer-Assistent")
     st.caption("Einkommensteuer · Bonn, NRW")
 
-    year_options = sorted(TAX_YEARS.keys(), reverse=True) 
-    extra_year = st.checkbox("Anderes Jahr eingeben")
-    if extra_year:
-        year = st.number_input("Steuerjahr", 2020, 2035, DEFAULT_YEAR, step=1)
-    else:
-        year = st.selectbox("Steuerjahr", year_options,
-                            index=year_options.index(DEFAULT_YEAR))
+    modus = st.radio(
+        "Wie möchtest du arbeiten?",
+        ["🧙 Einfach (Schritt für Schritt)", "🛠️ Experte (alle Tabs)"],
+        help="Der einfache Modus führt dich in 4 Schritten durch – "
+             "der Experten-Modus zeigt alle Tabs und Detailfelder auf "
+             "einmal.")
+    einfacher_modus = modus.startswith("🧙")
+
+    with st.expander("🛠️ Für Fortgeschrittene (Jahr, Pauschbeträge)",
+                     expanded=not einfacher_modus):
+        year_options = sorted(TAX_YEARS.keys(), reverse=True)
+        extra_year = st.checkbox("Anderes Jahr eingeben")
+        if extra_year:
+            year = st.number_input("Steuerjahr", 2020, 2035, DEFAULT_YEAR,
+                                   step=1)
+        else:
+            year = st.selectbox("Steuerjahr", year_options,
+                                index=year_options.index(DEFAULT_YEAR))
     cfg = get_config(int(year))
 
     api_key = st.text_input(
@@ -66,7 +76,10 @@ with st.sidebar:
         value=os.environ.get("ANTHROPIC_API_KEY", ""),
         help="Wird nur lokal verwendet. Alternativ Umgebungsvariable "
              "ANTHROPIC_API_KEY setzen.")
-    model = st.text_input("Vision-Modell", VISION_MODEL)
+    if not einfacher_modus:
+        model = st.text_input("Vision-Modell", VISION_MODEL)
+    else:
+        model = VISION_MODEL
 
     st.divider()
     erklaermodus = st.toggle("🎓 Erklär-Modus (für Steuer-Einsteiger)",
@@ -95,47 +108,52 @@ with st.sidebar:
         st.caption("📦 Belege: " + " · ".join(
             f"{j}: {n}" for j, n in sorted(_uebersicht.items()) if j))
     st.divider()
-    st.markdown("**💾 Projektstand**")
     _st_init()
-    st.download_button(
-        "Speichern (JSON)",
-        save_state(st.session_state, int(year), personen),
-        file_name=f"steuerprojekt_{int(year)}.json", mime="application/json",
-        use_container_width=True)
-    geladen = st.file_uploader("Projekt laden", type=["json"],
-                               key="proj_load")
-    if geladen and st.button("📂 Stand wiederherstellen",
-                             use_container_width=True):
-        meta = load_state(st.session_state, geladen.getvalue())
-        st.success(f"Stand vom {meta.get('gespeichert', '?')} geladen "
-                   f"(Jahr {meta.get('jahr')}).")
-        st.rerun()
+    with st.expander("💾 Projektstand speichern/laden & Pauschbeträge",
+                     expanded=not einfacher_modus):
+        st.markdown("**💾 Projektstand**")
+        st.download_button(
+            "Speichern (JSON)",
+            save_state(st.session_state, int(year), personen),
+            file_name=f"steuerprojekt_{int(year)}.json",
+            mime="application/json", use_container_width=True)
+        geladen = st.file_uploader("Projekt laden", type=["json"],
+                                   key="proj_load")
+        if geladen and st.button("📂 Stand wiederherstellen",
+                                 use_container_width=True):
+            meta = load_state(st.session_state, geladen.getvalue())
+            st.success(f"Stand vom {meta.get('gespeichert', '?')} geladen "
+                       f"(Jahr {meta.get('jahr')}).")
+            st.rerun()
 
-    st.divider()
-    st.markdown(
-        f"**Pauschbeträge {cfg['jahr']}**\n\n"
-        f"- Grundfreibetrag: {cfg['grundfreibetrag']:,} €\n"
-        f"- AN-Pauschbetrag: {cfg['arbeitnehmer_pauschbetrag']:,} €\n"
-        f"- Sparer-Pauschbetrag: {cfg['sparer_pauschbetrag']:,} €\n"
-        f"- § 23-Freigrenze: {cfg['freigrenze_private_veraeusserung']:,} €\n"
-        f"- Abgabefrist: {cfg['abgabefrist_hinweis']}".replace(",", "."))
-    if not cfg.get("_geprueft", True):
-        st.warning(f"Werte basieren auf {cfg['_basisjahr']} – bitte in "
-                   "`core/tax_config.py` für dieses Jahr pflegen.")
+        st.divider()
+        st.markdown(
+            f"**Pauschbeträge {cfg['jahr']}**\n\n"
+            f"- Grundfreibetrag: {cfg['grundfreibetrag']:,} €\n"
+            f"- AN-Pauschbetrag: {cfg['arbeitnehmer_pauschbetrag']:,} €\n"
+            f"- Sparer-Pauschbetrag: {cfg['sparer_pauschbetrag']:,} €\n"
+            f"- § 23-Freigrenze: {cfg['freigrenze_private_veraeusserung']:,} €\n"
+            f"- Abgabefrist: {cfg['abgabefrist_hinweis']}".replace(",", "."))
+        if not cfg.get("_geprueft", True):
+            st.warning(f"Werte basieren auf {cfg['_basisjahr']} – bitte in "
+                       "`core/tax_config.py` für dieses Jahr pflegen.")
     st.divider()
     st.caption("⚠️ Dieses Tool ersetzt keine Steuerberatung (§ 5 StBerG). "
                "Alle Werte vor Abgabe in ELSTER gegenprüfen.")
+
+def _docs_im_jahr():
+    return docs_im_jahr(st.session_state.docs, cfg["jahr"])
+
+
+if einfacher_modus:
+    render_wizard(cfg, api_key, model, st.session_state.interview, personen,
+                 erklaermodus)
+    st.stop()
 
 tab_docs, tab_crypto, tab_check, tab_spar, tab_elster, tab_basics = st.tabs(
     ["📄 1 · Dokumente", "₿ 2 · Krypto", "❓ 3 · Fragebogen & Prüfung",
      "💰 4 · Spar-Check", "🧮 5 · Ergebnis & ELSTER",
      "📖 6 · Verstehen & Fragen"])
-
-def _docs_im_jahr():
-    return [d for d in st.session_state.docs
-            if int(d.get("steuerjahr_zuordnung", cfg["jahr"]) or cfg["jahr"])
-            == cfg["jahr"]]
-
 
 with tab_spar:
     render_sparcheck(st.session_state.interview, personen)
@@ -146,136 +164,7 @@ with tab_crypto:
 
 # ---------------------------------------------------------------- Tab 1
 with tab_docs:
-    st.subheader("Belege hochladen & automatisch zuordnen")
-    st.markdown(
-        "Lade **PDFs oder Fotos** hoch – z. B. Lohnsteuerbescheinigungen "
-        "(zivil + Bundeswehr), Bank-Steuerbescheinigungen, Krypto-Reports, "
-        "Spendenquittungen, Handwerkerrechnungen. Claude erkennt Typ, Beträge "
-        "und ordnet sie der richtigen Anlage zu.")
-
-    uploads = st.file_uploader(
-        "Dateien auswählen", type=["pdf", "png", "jpg", "jpeg", "webp"],
-        accept_multiple_files=True)
-
-    new_files = [u for u in uploads or []
-                 if u.name not in st.session_state.analyzed_files]
-
-    if new_files and st.button(
-            f"🔍 {len(new_files)} neue(s) Dokument(e) analysieren",
-            type="primary", disabled=not api_key):
-        progress = st.progress(0.0)
-        for i, up in enumerate(new_files):
-            mime = up.type if up.type in SUPPORTED_IMAGE_TYPES | \
-                {"application/pdf"} else "application/pdf"
-            try:
-                result = analyze_document(
-                    up.getvalue(), mime, up.name, api_key, cfg["jahr"], model)
-                zuordnung = bestimme_steuerjahr(result)
-                if zuordnung is None:
-                    zuordnung = cfg["jahr"]
-                    result["rueckfragen"].append(
-                        "Kein Datum erkennbar – Beleg wurde dem aktuellen "
-                        f"Steuerjahr {cfg['jahr']} zugeordnet, bitte prüfen.")
-                result["steuerjahr_zuordnung"] = zuordnung
-                st.session_state.docs.append(result)
-                st.session_state.analyzed_files.add(up.name)
-            except Exception as exc:  # noqa: BLE001
-                st.error(f"Fehler bei '{up.name}': {exc}")
-            progress.progress((i + 1) / len(new_files))
-        st.rerun()
-    if new_files and not api_key:
-        st.info("Bitte zuerst den API-Key in der Seitenleiste eintragen.")
-
-    if st.session_state.docs:
-        st.divider()
-        docs_aktuell = _docs_im_jahr()
-        docs_andere = [d for d in st.session_state.docs
-                       if d not in docs_aktuell]
-        st.subheader(f"Belege für Steuerjahr {cfg['jahr']} "
-                     f"({len(docs_aktuell)})")
-        if docs_andere:
-            uebersicht = jahres_uebersicht(docs_andere)
-            st.info("📦 Automatisch sortiert: " + " · ".join(
-                f"{n} Beleg(e) → {j}" for j, n in sorted(uebersicht.items())
-                if j) + " – in der Seitenleiste das Steuerjahr wechseln, "
-                "um sie zu bearbeiten. Gespeichert bleiben alle.")
-        for i, d in enumerate(st.session_state.docs):
-            im_jahr = d in docs_aktuell
-            if not im_jahr:
-                continue
-            conf = d.get("confidence") or 0
-            icon = "🟢" if conf >= 0.85 else ("🟡" if conf >= 0.7 else "🔴")
-            with st.expander(
-                    f"{icon} {d['dateiname']} → "
-                    f"{cat.label_of(d['kategorie'])} "
-                    f"({conf:.0%})"):
-                c1, c2 = st.columns([2, 1])
-                with c1:
-                    st.markdown(
-                        f"**Typ:** {d.get('dokumenttyp', '–')}  \n"
-                        f"**Aussteller:** {d.get('aussteller') or '–'}  \n"
-                        f"**Datum:** {d.get('datum') or '–'} · "
-                        f"**Jahr:** {d.get('steuerjahr') or '–'}  \n"
-                        f"**Hauptbetrag:** "
-                        f"{d.get('betrag_eur') if d.get('betrag_eur') is not None else '–'} €  \n"
-                        f"**Anlage:** {cat.anlage_of(d['kategorie'])}")
-                    if erklaermodus:
-                        st.caption("🎓 " + KATEGORIE_ERKLAERUNG.get(
-                            d["kategorie"], ""))
-                    if d.get("extrahierte_daten"):
-                        st.json(d["extrahierte_daten"], expanded=False)
-                    for h in d.get("hinweise", []):
-                        st.warning(h)
-                    for q in d.get("rueckfragen", []):
-                        st.info(f"❓ {q}")
-                with c2:
-                    inh = st.selectbox(
-                        "Gehört zu", ["P1", "P2"],
-                        index=0 if d.get("inhaber", "P1") == "P1" else 1,
-                        format_func=lambda k: personen.get(k, k),
-                        key=f"inh_{i}")
-                    d["inhaber"] = inh
-                    keys = cat.category_options()
-                    new_cat = st.selectbox(
-                        "Kategorie korrigieren", keys,
-                        index=keys.index(d["kategorie"]),
-                        format_func=cat.label_of, key=f"cat_{i}")
-                    if new_cat != d["kategorie"]:
-                        d["kategorie"] = new_cat
-                        d["confidence"] = 1.0
-                        st.rerun()
-                    d["steuerjahr_zuordnung"] = st.number_input(
-                        "Steuerjahr", 2020, 2035,
-                        int(d.get("steuerjahr_zuordnung", cfg["jahr"])),
-                        key=f"jahr_{i}",
-                        help="Automatisch nach Zahlungsdatum sortiert "
-                             "(Abflussprinzip) – hier korrigierbar.")
-                    new_betrag = st.number_input(
-                        "Betrag (€) korrigieren",
-                        value=float(d.get("betrag_eur") or 0.0),
-                        key=f"amt_{i}")
-                    if new_betrag != (d.get("betrag_eur") or 0.0):
-                        d["betrag_eur"] = new_betrag
-                    if st.button("🗑️ Entfernen", key=f"del_{i}"):
-                        st.session_state.analyzed_files.discard(d["dateiname"])
-                        st.session_state.docs.pop(i)
-                        st.rerun()
-
-        if docs_andere:
-            with st.expander(f"📦 Geparkte Belege anderer Jahre "
-                             f"({len(docs_andere)})"):
-                for i, d in enumerate(st.session_state.docs):
-                    if d in docs_andere:
-                        c1, c2 = st.columns([3, 1])
-                        c1.markdown(
-                            f"`{d['dateiname']}` – "
-                            f"{cat.label_of(d['kategorie'])}, "
-                            f"{d.get('datum') or '–'}")
-                        d["steuerjahr_zuordnung"] = c2.number_input(
-                            "Jahr", 2020, 2035,
-                            int(d.get("steuerjahr_zuordnung",
-                                      cfg["jahr"])),
-                            key=f"pjahr_{i}", label_visibility="collapsed")
+    render_dokumente_tab(cfg, api_key, model, personen, erklaermodus)
 
 # ---------------------------------------------------------------- Tab 2
 with tab_check:
