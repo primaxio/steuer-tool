@@ -11,6 +11,9 @@ from core.betrieb_ui import render_betrieb_tab
 from core.checks import run_checks
 from core.dokumente_ui import render_dokumente_tab
 from core.elster_export import build_summary, export_json, render_elster_help
+from core.fragebogen_ui import (render_behinderung_pflege_unterhalt,
+                                render_fahrtkosten_homeoffice, render_riester,
+                                render_stammdaten, render_verlustvortraege)
 from core.tax_config import DEFAULT_YEAR, TAX_YEARS, VISION_MODEL, get_config
 from core.crypto_ui import render_crypto_tab, _st_init
 from core.erklaerungen import GLOSSAR, STEUER_101, frag_steuerberater
@@ -171,7 +174,7 @@ with tab_spar:
 
 with tab_crypto:
     render_crypto_tab(cfg, api_key, model, st.session_state.interview,
-                      personen)
+                      personen, st.session_state.docs)
 
 with tab_betrieb:
     render_betrieb_tab(cfg, st.session_state.interview, personen)
@@ -188,44 +191,10 @@ with tab_check:
 
     with st.expander("🪪 Stammdaten (für ELSTER-Hauptvordruck)",
                      expanded=not iv.get("stammdaten")):
-        sd = iv.setdefault("stammdaten", {})
-        c1, c2 = st.columns(2)
-        with c1:
-            sd["finanzamt"] = st.text_input(
-                "Finanzamt", sd.get("finanzamt", "Finanzamt Bonn-Innenstadt"))
-            sd["steuernummer"] = st.text_input(
-                "Gemeinsame Steuernummer (Format NRW: 5FF/BBB/UUUUP)",
-                sd.get("steuernummer", ""))
-            sd["iban"] = st.text_input("IBAN für Erstattung",
-                                       sd.get("iban", ""))
-        with c2:
-            for p_key in aktive:
-                sd[f"steuer_id_{p_key}"] = st.text_input(
-                    f"Steuer-ID {personen[p_key]} (11-stellig)",
-                    sd.get(f"steuer_id_{p_key}", ""), key=f"sid_{p_key}")
-                sd[f"religion_{p_key}"] = st.selectbox(
-                    f"Religion {personen[p_key]}",
-                    ["keine/andere (VD)", "ev", "rk"],
-                    ["keine/andere (VD)", "ev", "rk"].index(
-                        sd.get(f"religion_{p_key}", "keine/andere (VD)")),
-                    key=f"rel_{p_key}")
+        render_stammdaten(iv, personen, aktive)
 
     st.subheader("Fragebogen – Wege zur Arbeit (je Person)")
-    cols = st.columns(len(aktive))
-    for col, p_key in zip(cols, aktive):
-        with col:
-            st.markdown(f"**{personen[p_key]}**")
-            iv[f"entfernung_km_{p_key}"] = st.number_input(
-                "Einfache Entfernung (km)", 0.0, 300.0,
-                float(iv.get(f"entfernung_km_{p_key}") or 0.0), step=1.0,
-                key=f"km_{p_key}")
-            iv[f"arbeitstage_{p_key}"] = st.number_input(
-                "Tage mit Fahrt zur Arbeit", 0, 366,
-                int(iv.get(f"arbeitstage_{p_key}") or 0), key=f"at_{p_key}")
-            iv[f"homeoffice_tage_{p_key}"] = st.number_input(
-                "Homeoffice-Tage", 0, 366,
-                int(iv.get(f"homeoffice_tage_{p_key}") or 0),
-                key=f"ho_{p_key}")
+    render_fahrtkosten_homeoffice(iv, personen, aktive)
 
     st.subheader("Weitere Angaben")
     c1, c2, c3 = st.columns(3)
@@ -277,82 +246,15 @@ with tab_check:
 
     with st.expander("📉 Verlustvorträge aus Vorjahren (lt. Feststellungs-/"
                      "Steuerbescheid)"):
-        v1, v2, v3 = st.columns(3)
-        iv["verlustvortrag_23"] = v1.number_input(
-            "§ 23 / Krypto (€)", 0.0, 10_000_000.0,
-            float(iv.get("verlustvortrag_23") or 0.0), step=100.0)
-        iv["verlustvortrag_kap_aktien"] = v2.number_input(
-            "KAP Aktienverluste (€)", 0.0, 10_000_000.0,
-            float(iv.get("verlustvortrag_kap_aktien") or 0.0), step=100.0)
-        iv["verlustvortrag_kap_sonstige"] = v3.number_input(
-            "KAP sonstige Verluste (€)", 0.0, 10_000_000.0,
-            float(iv.get("verlustvortrag_kap_sonstige") or 0.0), step=100.0)
+        render_verlustvortraege(iv)
 
     with st.expander("🦽 Behinderung, Pflege & Unterhalt (§ 33b, § 33a EStG "
                      "– Pauschbeträge OHNE zumutbare Belastung)"):
-        st.caption("Diese Beträge wirken sofort und ungekürzt – anders als "
-                   "normale Krankheitskosten im Spar-Check.")
-        bcols = st.columns(len(aktive))
-        gdb_stufen = [0, 20, 30, 40, 50, 60, 70, 80, 90, 100]
-        for col, p_key in zip(bcols, aktive):
-            with col:
-                st.markdown(f"**{personen[p_key]}**")
-                iv[f"gdb_{p_key}"] = st.selectbox(
-                    "Grad der Behinderung (GdB)", gdb_stufen,
-                    gdb_stufen.index(int(iv.get(f"gdb_{p_key}") or 0))
-                    if int(iv.get(f"gdb_{p_key}") or 0) in gdb_stufen else 0,
-                    key=f"gdb_sel_{p_key}",
-                    help="Ab GdB 20 gibt es einen Pauschbetrag ohne "
-                         "Einzelnachweis (§ 33b EStG).")
-                if iv[f"gdb_{p_key}"] >= 20:
-                    iv[f"gdb_hilflos_blind_{p_key}"] = st.checkbox(
-                        "Merkzeichen H/Bl/TBl (hilflos/blind)?",
-                        value=bool(iv.get(f"gdb_hilflos_blind_{p_key}")),
-                        key=f"hb_gdb_{p_key}",
-                        help="Ersetzt den GdB-Pauschbetrag durch den "
-                             "erhöhten Pauschbetrag von 7.400 €.")
-        st.markdown("**Pflege eines Angehörigen (unentgeltlich, häuslich)**")
-        pflege_stufen = [0, 2, 3, 4, 5]
-        iv["pflegegrad_angehoeriger"] = st.selectbox(
-            "Pflegegrad der gepflegten Person", pflege_stufen,
-            pflege_stufen.index(int(iv.get("pflegegrad_angehoeriger") or 0))
-            if int(iv.get("pflegegrad_angehoeriger") or 0) in pflege_stufen
-            else 0, help="0 = keine Pflege. Ab Pflegegrad 2 gibt es einen "
-                         "Pauschbetrag (§ 33b Abs. 6 EStG).")
-        st.markdown("**Unterhaltsleistungen an bedürftige Personen "
-                   "(§ 33a EStG)**")
-        u1, u2 = st.columns(2)
-        iv["unterhalt_betrag"] = u1.number_input(
-            "Gezahlter Unterhalt (€/Jahr)", 0.0, 100_000.0,
-            float(iv.get("unterhalt_betrag") or 0.0), step=100.0)
-        iv["unterhalt_eigene_einkuenfte"] = u2.number_input(
-            "Eigene Einkünfte/Bezüge der unterstützten Person (€/Jahr)",
-            0.0, 100_000.0,
-            float(iv.get("unterhalt_eigene_einkuenfte") or 0.0), step=100.0,
-            help="Übersteigen diese 624 €/Jahr, wird der übersteigende "
-                 "Betrag vom Höchstbetrag abgezogen.")
+        render_behinderung_pflege_unterhalt(iv, personen, aktive)
 
     with st.expander("💰 Riester-Rente (Anlage AV, § 10a EStG – "
                      "Günstigerprüfung Zulage vs. Sonderausgabenabzug)"):
-        rcols = st.columns(len(aktive))
-        for col, p_key in zip(rcols, aktive):
-            iv[f"riester_beitrag_{p_key}"] = col.number_input(
-                f"Eigenbeitrag {personen[p_key]} (€/Jahr, inkl. Zulage)",
-                0.0, 10_000.0,
-                float(iv.get(f"riester_beitrag_{p_key}") or 0.0), step=10.0,
-                key=f"riester_b_{p_key}")
-        rk1, rk2 = st.columns(2)
-        iv["riester_kinder_ab_2008"] = rk1.number_input(
-            "Kinder mit Kinderzulage, geboren AB 2008", 0, 15,
-            int(iv.get("riester_kinder_ab_2008") or 0))
-        iv["riester_kinder_vor_2008"] = rk2.number_input(
-            "Kinder mit Kinderzulage, geboren VOR 2008", 0, 15,
-            int(iv.get("riester_kinder_vor_2008") or 0))
-        st.caption("Das Finanzamt vergleicht automatisch die Steuerersparnis "
-                  "durch den Sonderausgabenabzug mit der bereits "
-                  "gutgeschriebenen Zulage und zahlt nur den übersteigenden "
-                  "Betrag zusätzlich aus (Ergebnis im Rechenweg, Tab "
-                  "'Ergebnis & ELSTER').")
+        render_riester(iv, personen, aktive)
 
     st.divider()
     st.subheader("Automatische Prüfung")

@@ -31,8 +31,24 @@ def _read_table(upload) -> pd.DataFrame | None:
         return None
 
 
+def _broker_automatik_werte(docs: list) -> dict:
+    """Summiert Zeile 19/21/24-Werte aus hochgeladenen broker_steuerbericht-
+    Dokumenten – fließt bereits automatisch additiv in veranlagung.py/
+    elster_export.py ein (mit Warnhinweis gegen Doppel-Eingabe im
+    manuellen Termingeschäfte-Feld unten)."""
+    out = {"kap_zeile19_zinsen": 0.0, "kap_zeile21_termingewinne": 0.0,
+          "kap_zeile24_terminverluste": 0.0}
+    for d in docs or []:
+        if d.get("kategorie") != "broker_steuerbericht":
+            continue
+        ed = d.get("extrahierte_daten", {})
+        for feld in out:
+            out[feld] += float(ed.get(feld) or 0)
+    return out
+
+
 def render_crypto_tab(cfg: dict, api_key: str, model: str,
-                      interview: dict, personen: dict):
+                      interview: dict, personen: dict, docs: list = None):
     _st_init()
     ss = st.session_state
     e = lambda v: f"{v:,.2f} €".replace(",", "X").replace(".", ",").replace("X", ".")
@@ -188,6 +204,32 @@ def render_crypto_tab(cfg: dict, api_key: str, model: str,
                    "(z. B. eToro: 'Gewinne aus Termingeschäften' / Phemex: "
                    "Derivative P/L). Auslandsbroker behalten KEINE Steuer ein – "
                    "die ~26,4 % setzt das Finanzamt per Bescheid fest.")
+        broker_auto = _broker_automatik_werte(docs)
+        if any(broker_auto.values()):
+            manuell_gesetzt = any(
+                interview.get(f"termin_gewinne_{p}")
+                or interview.get(f"termin_verluste_{p}")
+                or interview.get(f"broker_zinsen_{p}")
+                for p in ("P1", "P2"))
+            hinweis = (
+                f"Zinsen {e(broker_auto['kap_zeile19_zinsen'])} · "
+                f"Termingewinne {e(broker_auto['kap_zeile21_termingewinne'])} · "
+                f"Terminverluste {e(broker_auto['kap_zeile24_terminverluste'])}")
+            if manuell_gesetzt:
+                st.warning(
+                    "⚠️ **Doppelerfassung-Risiko**: Aus deinem hochgeladenen "
+                    f"Broker-Steuerbericht wurden bereits **{hinweis}** "
+                    "automatisch übernommen (Tab 1 · Dokumente) UND "
+                    "zusätzlich sind unten manuelle Werte eingetragen – "
+                    "beide werden addiert! Nur eintragen, wenn es "
+                    "ZUSÄTZLICHE, unabhängige Beträge sind (z. B. ein "
+                    "zweiter Broker ohne Steuerbericht).")
+            else:
+                st.info(
+                    f"✅ Aus deinem hochgeladenen Broker-Steuerbericht "
+                    f"bereits automatisch übernommen: **{hinweis}**. Die "
+                    "Felder unten nur für WEITERE, davon unabhängige "
+                    "Broker/Beträge nutzen.")
         aktive_kap = ("P1", "P2") if interview.get("zusammenveranlagung") \
             else ("P1",)
         for p_key in aktive_kap:

@@ -123,25 +123,55 @@ GRUPPEN = [
     ("agb", "🏥 Außergewöhnliche Belastungen (Krankheitskosten)"),
 ]
 
-# Spar-Check-Posten, die inhaltlich mit den automatisch aus einer
-# hochgeladenen "nebenkostenabrechnung" extrahierten § 35a-Summen
-# überlappen (vision.py rechnet Schornsteinfeger/Heizungswartung bereits
-# in "posten_handwerker" ein) – hier droht bei zusätzlichem manuellem
-# Eintrag eine Doppelerfassung (siehe checks.py-Wächter, der dieselbe
-# Kombination als "fehler" meldet, hier aber direkt am Eingabefeld).
-_NK_AUTOMATIK_UEBERLAPPT = {"nk_abrechnung": "summe_haushaltsnah",
-                           "schornsteinfeger": "summe_handwerker"}
+# Spar-Check-Posten, die inhaltlich mit automatisch aus hochgeladenen
+# Belegen extrahierten Beträgen überlappen (siehe veranlagung.py/
+# elster_export.py, wo dieselben Belege bereits automatisch verrechnet
+# werden) – hier droht bei zusätzlichem manuellem Eintrag eine
+# Doppelerfassung. Jeder Eintrag: Liste von (Kategorie, Feld)-Paaren, die
+# zusammen die "bereits automatisch erfasst"-Summe für den Posten ergeben.
+# Feld=None -> der generische betrag_eur des Belegs.
+_AUTOMATIK_UEBERLAPPT = {
+    "nk_abrechnung": [("nebenkostenabrechnung", "summe_haushaltsnah")],
+    # Schornsteinfeger/Heizungswartung tauchen sowohl in NK-Abrechnungen
+    # (vision.py: "posten_handwerker") als auch als eigenständige
+    # Handwerkerrechnung auf – veranlagung.py summiert beide Quellen in
+    # denselben § 35a-Handwerker-Topf.
+    "schornsteinfeger": [("nebenkostenabrechnung", "summe_handwerker"),
+                         ("handwerker_haushaltsnah", "arbeitskosten")],
+    "spenden": [("spende", None)],
+    "krankheit": [("krankheitskosten", None)],
+}
 
 
-def _nk_automatik_werte(docs: list) -> dict:
-    out = {"summe_haushaltsnah": 0.0, "summe_handwerker": 0.0}
+def _automatik_werte(docs: list) -> dict:
+    """Summiert je überlappendem Spar-Check-Posten, was aus hochgeladenen
+    Belegen bereits automatisch in die Rechnung eingeflossen ist."""
+    out = {item_id: 0.0 for item_id in _AUTOMATIK_UEBERLAPPT}
     for d in docs or []:
-        if d.get("kategorie") != "nebenkostenabrechnung":
-            continue
+        kategorie = d.get("kategorie")
         ed = d.get("extrahierte_daten", {})
-        out["summe_haushaltsnah"] += float(ed.get("summe_haushaltsnah") or 0)
-        out["summe_handwerker"] += float(ed.get("summe_handwerker") or 0)
+        for item_id, quellen in _AUTOMATIK_UEBERLAPPT.items():
+            for quell_kat, feld in quellen:
+                if kategorie != quell_kat:
+                    continue
+                wert = ed.get(feld) if feld else d.get("betrag_eur")
+                out[item_id] += float(wert or 0)
     return out
+
+
+def _werbungskosten_belege_summe(docs: list, person: str) -> float:
+    """Summe hochgeladener 'werbungskosten'-Belege einer Person – fließt
+    bereits automatisch in die Werbungskosten ein (veranlagung.py Schritt
+    1). Nicht auf einzelne Spar-Check-Posten (Arbeitsmittel vs.
+    Fortbildung …) herunterbrechbar, da die Kategorie das nicht
+    unterscheidet – deshalb nur EIN gruppenweiter Hinweis statt je Posten."""
+    return sum(float(d.get("betrag_eur") or 0) for d in (docs or [])
+              if d.get("kategorie") == "werbungskosten"
+              and d.get("inhaber", "P1") == person)
+
+
+def _eur(v: float) -> str:
+    return f"{v:,.2f} €".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
 def render_sparcheck(interview: dict, personen: dict, docs: list = None):
@@ -152,7 +182,7 @@ def render_sparcheck(interview: dict, personen: dict, docs: list = None):
     spar = interview.setdefault("spar", {})
     zusammen = interview.get("zusammenveranlagung", True)
     aktive = ("P1", "P2") if zusammen else ("P1",)
-    nk_auto = _nk_automatik_werte(docs)
+    auto_werte = _automatik_werte(docs)
     # Stand VOR den Widgets dieses Durchlaufs (aus dem letzten Rerun) – für
     # die Zwischensummen an den Gruppen-Überschriften, damit man auch ohne
     # Aufklappen sieht, was schon erfasst ist.
@@ -167,6 +197,16 @@ def render_sparcheck(interview: dict, personen: dict, docs: list = None):
         with st.expander(label,
                          expanded=any(spar.get(i["id"], {}).get("aktiv")
                                       for i in items)):
+            if bucket == "wk":
+                for p in aktive:
+                    wk_belege = _werbungskosten_belege_summe(docs, p)
+                    if wk_belege:
+                        st.info(
+                            f"✅ **{_eur(wk_belege)}** an hochgeladenen "
+                            f"Werbungskosten-Belegen für {personen[p]} "
+                            "fließen bereits automatisch mit ein (Tab 1 · "
+                            "Dokumente) – hier nur ZUSÄTZLICHE Ausgaben "
+                            "ohne eigenen Beleg eintragen.")
             for item in items:
                 eintrag = spar.setdefault(item["id"], {})
                 aktiv = st.checkbox(item["titel"],
@@ -175,26 +215,23 @@ def render_sparcheck(interview: dict, personen: dict, docs: list = None):
                 eintrag["aktiv"] = aktiv
                 st.caption("💡 " + item["tipp"])
 
-                nk_feld = _NK_AUTOMATIK_UEBERLAPPT.get(item["id"])
-                nk_wert = nk_auto.get(nk_feld, 0.0) if nk_feld else 0.0
-                if nk_wert:
-                    nk_wert_str = (f"{nk_wert:,.2f} €".replace(",", "X")
-                                  .replace(".", ",").replace("X", "."))
+                auto_wert = auto_werte.get(item["id"], 0.0)
+                if auto_wert:
+                    auto_wert_str = _eur(auto_wert)
                     if aktiv:
                         st.warning(
-                            "⚠️ **Doppelerfassung-Risiko**: Aus deiner "
-                            "hochgeladenen Nebenkostenabrechnung wurden "
-                            f"dafür bereits **{nk_wert_str}** automatisch "
-                            "übernommen (Tab 1 · Dokumente). Häkchen hier "
-                            "nur setzen, wenn du ZUSÄTZLICHE, davon "
-                            "unabhängige Kosten eintragen willst – sonst "
-                            "bitte entfernen.")
+                            "⚠️ **Doppelerfassung-Risiko**: Aus deinen "
+                            "hochgeladenen Belegen wurden dafür bereits "
+                            f"**{auto_wert_str}** automatisch übernommen "
+                            "(Tab 1 · Dokumente). Häkchen hier nur setzen, "
+                            "wenn du ZUSÄTZLICHE, davon unabhängige Kosten "
+                            "eintragen willst – sonst bitte entfernen.")
                     else:
                         st.info(
-                            f"✅ **{nk_wert_str}** wurden bereits "
-                            "automatisch aus deiner Nebenkostenabrechnung "
-                            "übernommen – hier normalerweise nichts "
-                            "zusätzlich eintragen.")
+                            f"✅ **{auto_wert_str}** wurden bereits "
+                            "automatisch aus deinen hochgeladenen Belegen "
+                            "übernommen (Tab 1 · Dokumente) – hier "
+                            "normalerweise nichts zusätzlich eintragen.")
 
                 if aktiv:
                     if item["pro_person"]:

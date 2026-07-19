@@ -78,24 +78,34 @@ Finanzamt (ERiC-Zertifizierung nötig) – bewusste Design-Entscheidung.
 - `core/sparcheck.py` – ITEMS-Checkliste (~23 Posten, Buckets wk/sa/
   parteispenden/h35a_*/agb), render_sparcheck() = Tab 4, summen() liefert
   Topf-Summen; fließt in Rechner + ELSTER-Hilfe ("Zusätzliche Posten").
-  UX (Ausbaustufe 8): render_sparcheck() bekommt zusätzlich `docs`, um
-  Doppelerfassung DIREKT am Eingabefeld sichtbar zu machen (nicht erst
-  als Fehler in Tab 4) – `_nk_automatik_werte()` summiert
-  summe_haushaltsnah/summe_handwerker aus hochgeladenen
-  "nebenkostenabrechnung"-Belegen; ist der jeweilige Spar-Check-Posten
-  (`nk_abrechnung`, `schornsteinfeger` – beide überschneiden sich laut
-  vision.py-Extraktion mit der NK-Abrechnung) noch nicht angehakt, zeigt
-  ein `st.info` den bereits automatisch übernommenen Betrag ("hier
-  normalerweise nichts eintragen"); ist er angehakt, wird daraus ein
-  `st.warning` ("Doppelerfassung-Risiko"). Zusätzlich: laufende
-  Zwischensumme je Gruppen-Überschrift (sichtbar auch bei eingeklapptem
-  Expander) und eine `st.metric()`-Kachelreihe statt Fließtext am Ende.
+  UX (Ausbaustufe 8, "überall soll stehen wenn was übernommen wurde"):
+  render_sparcheck() bekommt zusätzlich `docs`, um Doppelerfassung
+  DIREKT am Eingabefeld sichtbar zu machen (nicht erst als Fehler in
+  Tab 4) – `_AUTOMATIK_UEBERLAPPT`/`_automatik_werte()` sind generisch
+  für ALLE überlappenden Posten (nicht nur NK-Abrechnung): je Posten
+  eine Liste (Kategorie, Feld)-Paare, deren Beträge summiert werden
+  (`nk_abrechnung` ← nebenkostenabrechnung.summe_haushaltsnah;
+  `schornsteinfeger` ← nebenkostenabrechnung.summe_handwerker UND
+  handwerker_haushaltsnah.arbeitskosten, da veranlagung.py beide in
+  denselben § 35a-Handwerker-Topf summiert; `spenden` ← spende;
+  `krankheit` ← krankheitskosten). Werbungskosten sind NICHT auf
+  einzelne Posten herunterbrechbar (eine Kategorie für Arbeitsmittel/
+  Fortbildung/etc.) → eigener gruppenweiter Hinweis je Person
+  (`_werbungskosten_belege_summe()`) statt Posten-Hinweis. Noch nicht
+  angehakt → `st.info` mit dem bereits automatisch übernommenen Betrag;
+  angehakt → `st.warning` ("Doppelerfassung-Risiko"). Dasselbe Muster
+  auch in `crypto_ui.py::render_crypto_tab()` (jetzt mit `docs`-Param)
+  für die Termingeschäfte-Felder vs. hochgeladene broker_steuerbericht-
+  Dokumente. Zusätzlich in sparcheck.py: laufende Zwischensumme je
+  Gruppen-Überschrift (sichtbar auch bei eingeklapptem Expander) und
+  eine `st.metric()`-Kachelreihe statt Fließtext am Ende.
   WICHTIG: Beim Bauen von Hinweistexten aus mehreren String-Literalen
   NIE `.replace(",", "X").replace(".", ",").replace("X", ".")` an die
   verkettete Literalkette hängen – das zerstört Satzzeichen im
   Fließtext (Python verkettet adjazente String-Literale VOR jedem
-  `.replace()`-Aufruf). Zahl zuerst separat formatieren, dann per
-  f-string in den Satz einsetzen (siehe `test_automatik.py`).
+  `.replace()`-Aufruf). Zahl zuerst separat formatieren (siehe
+  sparcheck._eur()), dann per f-string in den Satz einsetzen (Test dazu
+  in `test_automatik.py`).
 - `core/veranlagung.py` – berechne_veranlagung(): Brutto → WK (max mit
   Pauschbetrag) → +Krypto → −Vorsorge (LSB Z. 23–26, Fallback 19 % mit
   Warnung) → −SA (inkl. gezahlter KiSt!) → −agB über zumutbarer Grenze →
@@ -109,19 +119,34 @@ Finanzamt (ERiC-Zertifizierung nötig) – bewusste Design-Entscheidung.
   Fragebogen · Spar-Check · Ergebnis&ELSTER · Verstehen.
 
 ## Einfacher Modus (geführter Wizard)
-- `core/wizard.py` – render_wizard(): lineare 5-Schritte-Führung (Start ·
-  Belege · Fragen · Ergebnis · Fertig) für Steuer-Laien, die sich in der
-  Tab-Ansicht überfordert fühlen. Sidebar-Radio "Wie möchtest du arbeiten?"
-  schaltet zwischen Einfach (Wizard) und Experte (alle 6 Tabs) um; im
-  Einfach-Modus rendert app.py NUR den Wizard (st.stop() vor den Tabs).
-  State: st.session_state.wizard_step (Index 0–4).
+- `core/wizard.py` – render_wizard(): lineare **9-Schritte**-Führung
+  (Start · Belege · Grunddaten · Fahrtkosten & Homeoffice · Kapitalerträge
+  & Krypto · Weitere Vorteile · Stammdaten · Ergebnis · Fertig) für
+  Steuer-Laien, die sich in der Tab-Ansicht überfordert fühlen.
+  Sidebar-Radio "Wie möchtest du arbeiten?" schaltet zwischen Einfach
+  (Wizard) und Experte (alle 7 Tabs) um; im Einfach-Modus rendert app.py
+  NUR den Wizard (st.stop() vor den Tabs). State:
+  st.session_state.wizard_step (Index 0–8).
+- Ausbaustufe 8 ("Schritt für Schritt, nicht nur die Hauptpunkte"): der
+  Wizard deckt inzwischen ALLE Fragebogen-Themen ab, die vorher nur im
+  Experten-Modus verfügbar waren (Fahrtkosten, Homeoffice, Stammdaten,
+  Verlustvorträge, Behinderung/Pflege/Unterhalt, Riester) – jeweils als
+  eigener Schritt bzw. hinter einer Ja/Nein-Weiche versteckt (Schritt
+  "Weitere Vorteile"), damit wer nicht betroffen ist, einfach mit "Nein"
+  weiterklickt, statt alle Felder auf einmal zu sehen. NUR "Betrieb"
+  bleibt bewusst Experten-Modus-only (zu komplex für eine Wizard-Frage;
+  der Wizard fragt aber danach und verweist aktiv dorthin).
+- `core/fragebogen_ui.py` (NEU, Ausbaustufe 8) – gemeinsame Render-
+  Bausteine (render_stammdaten, render_fahrtkosten_homeoffice,
+  render_behinderung_pflege_unterhalt, render_riester,
+  render_verlustvortraege + hat_*()-Prädikate für die Ja/Nein-Weichen),
+  von app.py (Experten-Tab "Fragebogen & Prüfung") UND wizard.py
+  gemeinsam genutzt (Muster wie dokumente_ui.py) – KEINE Duplikate.
+  `key_prefix`-Parameter verhindert Widget-Key-Kollisionen zwischen den
+  beiden Aufrufstellen.
 - Wizard nutzt dieselben Kernfunktionen wie die Tabs (run_checks,
   berechne_veranlagung, build_summary, render_crypto_tab) – KEINE eigene
-  Business-Logik, nur reduzierte Feldauswahl (4 Ja/Nein-Fragen statt
-  Stammdaten/Verlustvorträge/Fahrtkosten – diese bleiben im Experten-Modus).
-  Krypto-Erfassung erscheint als eingebetteter Expander in Schritt "Fragen",
-  wenn "Krypto verkauft?" mit Ja beantwortet wird (kein eigener Wizard-Schritt,
-  damit die Schrittzahl konstant bleibt).
+  Business-Logik.
 - `core/dokumente_ui.py` – render_dokumente_tab(): Beleg-Upload/-Analyse/
   -Korrektur aus dem alten Tab 1 extrahiert, damit Experten-Tab und
   Wizard-Schritt "Belege" dieselbe Logik nutzen (keine Duplikate).

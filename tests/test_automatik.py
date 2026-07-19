@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core.checks import run_checks
 from core.elster_export import build_summary, render_elster_help
-from core.sparcheck import _nk_automatik_werte
+from core.sparcheck import _automatik_werte, _werbungskosten_belege_summe
 from core.tax_config import get_config
 from core.veranlagung import berechne_veranlagung
 
@@ -95,16 +95,50 @@ def test_veranlagung_ermaessigung():
           "Broker-Warnhinweis vorhanden")
 
 
-def test_sparcheck_nk_automatik_werte():
+def test_sparcheck_automatik_werte():
     """Spar-Check-Tab (Doppelerfassungs-Hinweis direkt am Eingabefeld,
-    siehe app.py) liest dieselben Summen wie checks.py/veranlagung.py."""
-    werte = _nk_automatik_werte(DOCS)
-    assert werte["summe_haushaltsnah"] == 593.64
-    assert werte["summe_handwerker"] == 26.26
-    assert _nk_automatik_werte([])["summe_haushaltsnah"] == 0.0
-    assert _nk_automatik_werte(None)["summe_handwerker"] == 0.0
-    print("✅ sparcheck._nk_automatik_werte() summiert korrekt "
-         "(inkl. leere/None-Docs-Liste)")
+    siehe app.py) liest dieselben Summen wie checks.py/veranlagung.py –
+    für ALLE überlappenden Posten, nicht nur die NK-Abrechnung."""
+    werte = _automatik_werte(DOCS)
+    assert werte["nk_abrechnung"] == 593.64
+    assert werte["schornsteinfeger"] == 26.26
+    assert werte["spenden"] == 0.0
+    assert werte["krankheit"] == 0.0
+    assert _automatik_werte([])["nk_abrechnung"] == 0.0
+    assert _automatik_werte(None)["schornsteinfeger"] == 0.0
+
+    docs_erweitert = DOCS + [
+        {"dateiname": "spende.pdf", "kategorie": "spende",
+         "betrag_eur": 150.0, "extrahierte_daten": {}},
+        {"dateiname": "arzt.pdf", "kategorie": "krankheitskosten",
+         "betrag_eur": 340.0, "extrahierte_daten": {}},
+        {"dateiname": "schornsteinfeger_rechnung.pdf",
+         "kategorie": "handwerker_haushaltsnah", "betrag_eur": 80.0,
+         "extrahierte_daten": {"arbeitskosten": 60.0}},
+    ]
+    werte2 = _automatik_werte(docs_erweitert)
+    assert werte2["spenden"] == 150.0
+    assert werte2["krankheit"] == 340.0
+    # Schornsteinfeger jetzt aus ZWEI Quellen (NK-Abrechnung + eigene
+    # Handwerkerrechnung) summiert:
+    assert werte2["schornsteinfeger"] == 26.26 + 60.0
+    print("✅ sparcheck._automatik_werte() summiert korrekt für alle "
+         "überlappenden Posten (NK, Handwerkerrechnung, Spende, "
+         "Krankheitskosten; inkl. leere/None-Docs-Liste)")
+
+
+def test_sparcheck_werbungskosten_belege_summe():
+    docs = [
+        {"kategorie": "werbungskosten", "inhaber": "P1", "betrag_eur": 200.0},
+        {"kategorie": "werbungskosten", "inhaber": "P1", "betrag_eur": 50.0},
+        {"kategorie": "werbungskosten", "inhaber": "P2", "betrag_eur": 999.0},
+        {"kategorie": "spende", "inhaber": "P1", "betrag_eur": 10.0},
+    ]
+    assert _werbungskosten_belege_summe(docs, "P1") == 250.0
+    assert _werbungskosten_belege_summe(docs, "P2") == 999.0
+    assert _werbungskosten_belege_summe([], "P1") == 0.0
+    print("✅ sparcheck._werbungskosten_belege_summe() summiert korrekt "
+         "je Person")
 
 
 def test_sparcheck_warnhinweis_zerstoert_satzzeichen_nicht():
@@ -130,6 +164,7 @@ if __name__ == "__main__":
     test_checks_hinweise()
     test_summary_und_elster_hilfe()
     test_veranlagung_ermaessigung()
-    test_sparcheck_nk_automatik_werte()
+    test_sparcheck_automatik_werte()
+    test_sparcheck_werbungskosten_belege_summe()
     test_sparcheck_warnhinweis_zerstoert_satzzeichen_nicht()
     print("🎉 Alle Automatik-Tests bestanden.")
