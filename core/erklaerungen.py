@@ -52,6 +52,7 @@ KATEGORIE_ERKLAERUNG = {
     "nebenkostenabrechnung": "Deine Betriebskostenabrechnung enthält versteckte Steuer-Rabatte: 20 % der Lohnkosten für Hausmeister, Treppenhausreinigung & Co. zieht das Finanzamt direkt von der Steuer ab. Das Tool hat die begünstigten Posten automatisch herausgesucht – Grundsteuer, Wasser und Heizöl zählen nicht.",
     "broker_steuerbericht": "Der offizielle Jahresbericht deines Brokers. Termingeschäfte (CFDs) und Zinsen wurden automatisch in die Anlage KAP übernommen – dort werden sie mit ~26,4 % besteuert, weil Auslandsbroker keine Steuer einbehalten. Der Krypto-Wert dient als Kontrollzahl.",
     "krankheitskosten": "Arzt-, Zahnarzt-, Brillenkosten zählen als außergewöhnliche Belastung – aber erst oberhalb deiner 'zumutbaren Belastung' (einige Prozent des Einkommens). Sammeln lohnt in teuren Jahren.",
+    "rentenbezugsmitteilung": "Die jährliche Mitteilung deines Rentenversicherungsträgers über den Jahresbetrag deiner Rente. Wichtig: Nicht die volle Rente ist steuerpflichtig, sondern nur ein fester Prozentsatz, der sich einmalig nach deinem Rentenbeginn-Jahr richtet ('Besteuerungsanteil') – der Rest bleibt dauerhaft steuerfrei.",
     "betrieb_einnahme": "Eine Einnahme aus deinem Betrieb oder Nebengewerbe (z. B. eine Gutschrift vom Energieversorger für verkauften Strom/Wärme). Ordne sie im Tab 'Betrieb' dem richtigen Betrieb zu – zusammen mit den Ausgaben ergibt das deinen Gewinn (Einnahmen-Überschuss-Rechnung).",
     "betrieb_ausgabe": "Eine Ausgabe deines Betriebs (Wartung, Material, Anschaffung). Sie mindert deinen Gewinn – bei größeren Anschaffungen (Anlagegütern) wird der Betrag nicht auf einmal, sondern über mehrere Jahre verteilt abgeschrieben (AfA).",
     "sonstiges": "Konnte nicht sicher zugeordnet werden – bitte einmal kurz prüfen und die richtige Kategorie wählen.",
@@ -66,6 +67,9 @@ ANLAGEN_ERKLAERT = {
     "Haushaltsnahe Aufwendungen": "💡 *Einfach erklärt: 20 % der Handwerker-Arbeitskosten werden dir DIREKT von der Steuer abgezogen – das ist bares Geld, kein bloßer Abzugsposten.*",
     "Außergewöhnliche Belastungen": "💡 *Einfach erklärt: Hohe Krankheitskosten zählen erst, wenn sie deine 'zumutbare' Eigenbeteiligung übersteigen.*",
     "Gewerbe & Selbständigkeit (EÜR)": "💡 *Einfach erklärt: Betreibst du nebenbei ein Gewerbe (z. B. Stromverkauf) oder arbeitest freiberuflich, zählt hier NICHT der Umsatz, sondern der GEWINN: Einnahmen minus Ausgaben minus Abschreibungen (AfA – große Anschaffungen werden über mehrere Jahre verteilt abgezogen, nicht auf einmal). Dieser Gewinn wird wie Gehalt zu deinem übrigen Einkommen addiert.*",
+    "R": "💡 *Einfach erklärt: Von deiner Rente ist NICHT alles steuerpflichtig – nur ein fester Prozentsatz, der sich einmalig nach deinem Rentenbeginn-Jahr richtet. Wer 2005 oder früher in Rente ging, versteuert nur 50 %; wer erst 2058 oder später beginnt, 100 %. Der Rest bleibt für immer steuerfrei.*",
+    "AV": "💡 *Einfach erklärt: Für Riester-Beiträge bekommst du entweder die staatliche Zulage ODER den Steuervorteil aus dem Sonderausgabenabzug – das Finanzamt gibt dir automatisch das Bessere von beidem. Die Zulage bekommst du in jedem Fall, den Steuervorteil nur, wenn er höher ist.*",
+    "Behinderung, Pflege & Unterhalt": "💡 *Einfach erklärt: Bei Behinderung, Pflege von Angehörigen oder Unterhaltszahlungen gibt es feste Pauschbeträge, die – anders als normale Krankheitskosten – SOFORT und OHNE Abzug einer 'zumutbaren Eigenbelastung' wirken.*",
 }
 
 STEUER_101 = """

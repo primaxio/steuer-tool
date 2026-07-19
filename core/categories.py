@@ -103,6 +103,16 @@ CATEGORIES = {
             "Wird im Tab 'Betrieb' einem angelegten Betrieb zugeordnet."
         ),
     },
+    "rentenbezugsmitteilung": {
+        "label": "Rentenbezugsmitteilung (gesetzliche Rente/Rürup)",
+        "anlage": "Anlage R",
+        "beschreibung": (
+            "Jährliche Mitteilung des Rentenversicherungsträgers an das "
+            "Finanzamt über den Jahresbetrag der Rente. Nur ein fester, "
+            "vom Rentenbeginn-Jahr abhängiger Prozentsatz ist "
+            "steuerpflichtig (Besteuerungsanteil)."
+        ),
+    },
     "betrieb_ausgabe": {
         "label": "Betriebsausgabe (Wartung, Material, Anschaffung)",
         "anlage": "Anlage G/S – Einnahmen-Überschuss-Rechnung (EÜR)",

@@ -386,6 +386,28 @@ def run_checks(docs: list, cfg: dict, interview: dict) -> list:
         add("frage", "Bist du kirchensteuerpflichtig? (Relevant für KAP und "
                      "Sonderausgabenabzug der Kirchensteuer.)")
 
+    # ---------- Rente (Anlage R) ----------
+    for d in _docs_by_cat(docs, "rentenbezugsmitteilung"):
+        if not d.get("extrahierte_daten", {}).get("rentenbeginn_jahr"):
+            add("warnung",
+                f"Rentenbezugsmitteilung `{d.get('dateiname', '?')}`: "
+                "Rentenbeginn-Jahr fehlt – ohne dieses Jahr kann der "
+                "Besteuerungsanteil nicht bestimmt werden und wurde "
+                "vorsichtshalber mit 100 % angesetzt. Bitte im Beleg "
+                "nachtragen.")
+
+    # ---------- Behinderung / Pflege / Unterhalt ----------
+    hat_krankheitskosten = bool(_docs_by_cat(docs, "krankheitskosten")) or \
+        bool((interview.get("spar") or {}).get("krankheit", {}).get("aktiv"))
+    if hat_krankheitskosten and not any(
+            interview.get(f"gdb_{p}") for p in ("P1", "P2")):
+        add("frage",
+            "Krankheitskosten erfasst: Liegt bei dir/deinem Partner eine "
+            "amtlich festgestellte Behinderung (GdB) vor? Ab GdB 20 gibt "
+            "es einen Pauschbetrag OHNE Einzelnachweis und OHNE Kürzung "
+            "um die zumutbare Belastung (Fragebogen-Tab, Bereich "
+            "'Behinderung, Pflege & Unterhalt').")
+
     return findings
 
 

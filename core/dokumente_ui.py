@@ -2,6 +2,7 @@
 Ausgelagert aus app.py, damit sowohl der Experten-Tab als auch der
 Einfache-Modus-Wizard dieselbe Logik nutzen (keine Duplikate)."""
 
+import base64
 from datetime import datetime
 
 import streamlit as st
@@ -146,6 +147,8 @@ def render_dokumente_tab(cfg: dict, api_key: str, model: str,
                         "Kein Datum erkennbar – Beleg wurde dem aktuellen "
                         f"Steuerjahr {cfg['jahr']} zugeordnet, bitte prüfen.")
                 result["steuerjahr_zuordnung"] = zuordnung
+                result["_bytes"] = base64.b64encode(up.getvalue()).decode("ascii")
+                result["_mime"] = mime
                 st.session_state.docs.append(result)
                 st.session_state.analyzed_files.add(up.name)
             except Exception as exc:  # noqa: BLE001
@@ -199,6 +202,12 @@ def render_dokumente_tab(cfg: dict, api_key: str, model: str,
                     for q in d.get("rueckfragen", []):
                         st.info(f"❓ {q}")
                 with c2:
+                    if d.get("_bytes"):
+                        st.download_button(
+                            "📥 Original-Beleg", base64.b64decode(d["_bytes"]),
+                            file_name=d["dateiname"],
+                            mime=d.get("_mime", "application/octet-stream"),
+                            key=f"dl_{i}", use_container_width=True)
                     inh = st.selectbox(
                         "Gehört zu", ["P1", "P2"],
                         index=0 if d.get("inhaber", "P1") == "P1" else 1,

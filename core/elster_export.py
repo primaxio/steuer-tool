@@ -203,7 +203,44 @@ def build_summary(docs: list, cfg: dict, interview: dict) -> dict:
         s["anlagen"]["Außergewöhnliche Belastungen"] = {
             "summe_belege": round(sum(_num(d.get("betrag_eur")) for d in agb), 2),
             "hinweis": "Wirkt erst oberhalb der zumutbaren Belastung "
-                       "(1–7 % des Gesamtbetrags der Einkünfte).",
+                       "(§ 33 Abs. 3 EStG, dreistufig 1–7 % des Gesamtbetrags "
+                       "der Einkünfte je nach Familienstand/Kinderzahl – "
+                       "genauer Wert im Rechenweg des Tabs 'Ergebnis & "
+                       "ELSTER').",
+        }
+
+    # ---------- Behinderten-/Pflege-Pauschbetrag, § 33a-Unterhalt ----------
+    from .veranlagung import _behinderten_pflege_unterhalt
+    pauschale_summe, pauschale_hinweise = _behinderten_pflege_unterhalt(
+        interview, cfg)
+    if pauschale_summe:
+        s["anlagen"]["Behinderung, Pflege & Unterhalt"] = {
+            "summe": pauschale_summe, "hinweise": pauschale_hinweise,
+        }
+
+    # ---------- Anlage R (Renten) ----------
+    renten_docs = cat(docs, "rentenbezugsmitteilung")
+    if renten_docs:
+        from .rente import rentenanteil_steuerpflichtig
+        eintraege = []
+        for d in renten_docs:
+            jahresbetrag = ed(d, "jahresbetrag_rente", d.get("betrag_eur"))
+            beginn = int(ed(d, "rentenbeginn_jahr", 0))
+            r = rentenanteil_steuerpflichtig(jahresbetrag, beginn, cfg)
+            eintraege.append({
+                "inhaber": d.get("inhaber", "P1"), "datei": d["dateiname"],
+                "rentenbeginn_jahr": beginn, **r})
+        s["anlagen"]["R"] = {"eintraege": eintraege}
+
+    # ---------- Anlage AV (Riester) ----------
+    riester_beitrag = {p: _num(interview.get(f"riester_beitrag_{p}"))
+                       for p in ("P1", "P2")}
+    if any(riester_beitrag.values()):
+        s["anlagen"]["AV"] = {
+            "beitraege": riester_beitrag,
+            "kinder_ab_2008": int(_num(interview.get("riester_kinder_ab_2008"))),
+            "kinder_vor_2008": int(_num(interview.get("riester_kinder_vor_2008"))),
+            "max_beitrag": cfg["riester_max_beitrag"],
         }
 
     # ---------- Gewerbe & Selbständigkeit (Anlage G / Anlage EÜR) ----------
@@ -455,7 +492,8 @@ def render_elster_help(s: dict, erklaeren: bool = True) -> str:
                "(fließt in die Summe der Einkünfte ein).", ""]
 
     for name in ("Sonderausgaben", "Vorsorgeaufwand",
-                 "Haushaltsnahe Aufwendungen", "Außergewöhnliche Belastungen"):
+                 "Haushaltsnahe Aufwendungen", "Außergewöhnliche Belastungen",
+                 "Behinderung, Pflege & Unterhalt"):
         block = s["anlagen"].get(name)
         if not block:
             continue
@@ -470,11 +508,57 @@ def render_elster_help(s: dict, erklaeren: bool = True) -> str:
                             parts.append(str(b[f]))
                     betrag = b.get("betrag", b.get("arbeitskosten"))
                     out.append(f"- {' – '.join(parts)}: {e(_num(betrag))}")
+            elif k == "hinweise" and isinstance(v, list):
+                for h in v:
+                    out.append(f"- {h}")
             elif isinstance(v, (int, float)):
                 out.append(f"- {k.replace('_', ' ').capitalize()}: {e(v)}")
             elif isinstance(v, str):
                 out.append(f"- {v}")
         out.append("")
+
+    r = s["anlagen"].get("R")
+    if r:
+        out.append("## Anlage R – Renten")
+        erk("R")
+        gesamt_stpfl = 0.0
+        namen = {"P1": "Person 1", "P2": "Person 2"}
+        for eintrag in r["eintraege"]:
+            out += [
+                f"### {namen.get(eintrag['inhaber'], eintrag['inhaber'])} – "
+                f"`{eintrag['datei']}`",
+                f"- Jahresbetrag: {e(eintrag['jahresbetrag'])}",
+                f"- Rentenbeginn: {eintrag['rentenbeginn_jahr'] or '–'} "
+                f"→ Besteuerungsanteil {eintrag['besteuerungsanteil_prozent']:.1f} %",
+                f"- Steuerpflichtiger Anteil (Zeile 4/5 Anlage R): "
+                f"{e(eintrag['steuerpflichtiger_anteil'])}",
+                f"- Steuerfreier Anteil (NICHT eintragen): "
+                f"{e(eintrag['steuerfreier_anteil'])}",
+                "",
+            ]
+            gesamt_stpfl += eintrag["steuerpflichtiger_anteil"]
+        out += [f"**Steuerpflichtiger Rentenanteil gesamt: {e(gesamt_stpfl)}** "
+               "(fließt in die Summe der Einkünfte ein).", ""]
+
+    av = s["anlagen"].get("AV")
+    if av:
+        out.append("## Anlage AV – Riester-Rente")
+        erk("AV")
+        namen = {"P1": "Person 1", "P2": "Person 2"}
+        for p, betrag in av["beitraege"].items():
+            if betrag:
+                out.append(f"- Eigenbeitrag {namen.get(p, p)}: {e(betrag)} "
+                           f"(Höchstbetrag: {e(av['max_beitrag'])})")
+        if av["kinder_ab_2008"] or av["kinder_vor_2008"]:
+            out.append(
+                f"- Kinderzulage: {av['kinder_ab_2008']} Kind(er) ab "
+                f"Geburtsjahrgang 2008, {av['kinder_vor_2008']} davor.")
+        out += [
+            "- Die Günstigerprüfung (Sonderausgabenabzug vs. Zulage) "
+            "übernimmt das Finanzamt automatisch – Ergebnis im Rechenweg "
+            "des Tabs 'Ergebnis & ELSTER'.",
+            "",
+        ]
 
     sp = s.get("sparcheck") or {}
     if any(v > 0 for v in sp.values()):

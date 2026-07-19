@@ -7,11 +7,91 @@ SCHÄTZUNG gekennzeichnet – der Bescheid des Finanzamts kann abweichen.
 from .checks import _num, entfernungspauschale
 from .crypto import est_nach_tarif
 from .fuenftelregelung import fuenftelregelung
+from .rente import rentenanteil_steuerpflichtig
 from .sparcheck import summen
 
 
 def _ed(d, feld, fallback=None):
     return _num(d.get("extrahierte_daten", {}).get(feld, fallback))
+
+
+def _tarif(zve: float, zusammen: bool, cfg: dict) -> float:
+    """Tarifliche ESt (Grundtarif/Splitting) für eine zvE-Grenzbetrachtung."""
+    zve = max(0.0, zve)
+    return (2 * est_nach_tarif(zve / 2, cfg)) if zusammen \
+        else est_nach_tarif(zve, cfg)
+
+
+def _zumutbare_belastung(gesamtbetrag_einkuenfte: float, zusammen: bool,
+                         kinderzahl: int, cfg: dict) -> float:
+    """§ 33 Abs. 3 EStG, dreistufige Berechnung (BFH VI R 75/14): auf den
+    Einkommensanteil bis 15.340 € gilt der niedrigste Satz der jeweiligen
+    Spalte, auf den Anteil 15.340–51.130 € der mittlere, auf den Rest der
+    höchste Satz. Sätze hängen von Familienstand/Kinderzahl ab."""
+    if kinderzahl >= 3:
+        key = "kinder_3plus"
+    elif kinderzahl >= 1:
+        key = "kinder_1_2"
+    elif zusammen:
+        key = "verheiratet"
+    else:
+        key = "ledig"
+    satz1, satz2, satz3 = cfg["zumutbare_belastung_saetze"][key]
+    stufe1, stufe2 = cfg["zumutbare_belastung_stufen"]
+    g = max(0.0, gesamtbetrag_einkuenfte)
+    teil1 = min(g, stufe1) * satz1
+    teil2 = max(0.0, min(g, stufe2) - stufe1) * satz2
+    teil3 = max(0.0, g - stufe2) * satz3
+    return round(teil1 + teil2 + teil3, 2)
+
+
+def _behinderten_pflege_unterhalt(interview: dict, cfg: dict) -> tuple:
+    """§ 33b EStG (Behinderten-/Pflege-Pauschbetrag) und § 33a EStG
+    (Unterhalt) – anders als Krankheitskosten OHNE Kürzung um die
+    zumutbare Belastung, deshalb als eigener Block direkt vom
+    Gesamtbetrag der Einkünfte abgezogen. Gibt (summe, hinweise) zurück."""
+    summe = 0.0
+    hinweise = []
+    for p in ("P1", "P2"):
+        gdb = int(_num(interview.get(f"gdb_{p}")))
+        if gdb >= 20:
+            if interview.get(f"gdb_hilflos_blind_{p}"):
+                betrag = cfg["behinderten_pauschbetrag_hilflos_blind"]
+            else:
+                stufe = max((g for g in cfg["behinderten_pauschbetrag"]
+                            if g <= gdb), default=0)
+                betrag = cfg["behinderten_pauschbetrag"].get(stufe, 0.0)
+            if betrag:
+                summe += betrag
+                hinweise.append(
+                    f"Behinderten-Pauschbetrag {p} (GdB {gdb}): "
+                    f"{betrag:.2f} € – ohne Einzelnachweis, ohne Kürzung "
+                    "um die zumutbare Belastung.")
+    pflegegrad = int(_num(interview.get("pflegegrad_angehoeriger")))
+    if pflegegrad >= 2:
+        betrag = cfg["pflege_pauschbetrag"].get(
+            min(pflegegrad, 5), cfg["pflege_pauschbetrag"][5])
+        summe += betrag
+        hinweise.append(
+            f"Pflege-Pauschbetrag (Pflegegrad {pflegegrad}, unentgeltliche "
+            f"häusliche Pflege): {betrag:.2f} € – ohne Kürzung um die "
+            "zumutbare Belastung.")
+    unterhalt_betrag = _num(interview.get("unterhalt_betrag"))
+    if unterhalt_betrag:
+        anrechnungsfrei = cfg["unterhalt_anrechnungsfreier_betrag"]
+        eigene_einkuenfte = _num(interview.get("unterhalt_eigene_einkuenfte"))
+        kuerzung = max(0.0, eigene_einkuenfte - anrechnungsfrei)
+        hoechstbetrag = cfg["grundfreibetrag"]
+        abzugsfaehig = max(0.0, min(unterhalt_betrag, hoechstbetrag) - kuerzung)
+        if abzugsfaehig:
+            summe += abzugsfaehig
+            hinweise.append(
+                f"§ 33a-Unterhalt: {abzugsfaehig:.2f} € abzugsfähig "
+                f"(Höchstbetrag {hoechstbetrag:.2f} € = Grundfreibetrag, "
+                f"gekürzt um eigene Einkünfte/Bezüge des Empfängers über "
+                f"{anrechnungsfrei:.2f} € anrechnungsfreiem Betrag) – "
+                "ohne Kürzung um die zumutbare Belastung.")
+    return round(summe, 2), hinweise
 
 
 def berechne_veranlagung(docs: list, cfg: dict, interview: dict) -> dict:
@@ -69,6 +149,31 @@ def berechne_veranlagung(docs: list, cfg: dict, interview: dict) -> dict:
             summe_einkuenfte += gewinn
             summe_einkuenfte_ohne_beihilfe += gewinn
 
+    # ---------- 1c) Einkünfte aus Renten (Anlage R, § 22 Nr. 1 EStG)
+    renten_docs = [d for d in docs if d.get("kategorie") == "rentenbezugsmitteilung"]
+    for p in aktive:
+        for d in renten_docs:
+            if d.get("inhaber", "P1") != p:
+                continue
+            jahresbetrag = _ed(d, "jahresbetrag_rente", d.get("betrag_eur"))
+            beginn = int(_ed(d, "rentenbeginn_jahr", 0))
+            if not jahresbetrag:
+                continue
+            r = rentenanteil_steuerpflichtig(jahresbetrag, beginn, cfg)
+            if r["steuerpflichtiger_anteil"]:
+                step(f"+ Rente {p} (Besteuerungsanteil "
+                     f"{r['besteuerungsanteil_prozent']:.1f} %, "
+                     f"Rentenbeginn {beginn or '?'})",
+                     r["steuerpflichtiger_anteil"])
+                summe_einkuenfte += r["steuerpflichtiger_anteil"]
+                summe_einkuenfte_ohne_beihilfe += r["steuerpflichtiger_anteil"]
+                if not beginn:
+                    b["warnhinweise"].append(
+                        "Rentenbeginn-Jahr auf der Rentenbezugsmitteilung "
+                        "nicht erkannt – Besteuerungsanteil wurde "
+                        "vorsichtshalber mit 100 % angesetzt. Bitte "
+                        "Rentenbeginn-Jahr im Beleg prüfen/nachtragen.")
+
     # ---------- 2) Sonstige Einkünfte (Krypto § 23 + § 22 Nr. 3)
     krypto_23 = sum(a.get("steuerpflichtiger_betrag", 0)
                     for a in crypto["pro_person"].values())
@@ -117,7 +222,7 @@ def berechne_veranlagung(docs: list, cfg: dict, interview: dict) -> dict:
     # unabhängiger Höchstbetrag (Beitragsbemessungsgrenze) – seit 2023 zu
     # 100 % abzugsfähig, hier nicht extra gedeckelt (bei normalen
     # Arbeitnehmerbeiträgen ohnehin weit darunter).
-    rv_summe = sum(_ed(d, "rv_arbeitnehmer") for d in lsb)
+    rv_summe = sum(_ed(d, "rv_arbeitnehmer") for d in lsb) + spar["vorsorge_basis"]
     kv_pv_summe = sum(_ed(d, "kv_beitraege") + _ed(d, "pv_beitraege")
                       for d in lsb)
     if rv_summe == 0 and kv_pv_summe == 0 and lsb:
@@ -134,7 +239,9 @@ def berechne_veranlagung(docs: list, cfg: dict, interview: dict) -> dict:
             "Vorsorgeaufwand wurde mit ~19 % des Bruttos GESCHÄTZT (als "
             "Basis-KV/PV behandelt).")
     vorsorge_basis = rv_summe + kv_pv_summe
-    step("− Vorsorgeaufwendungen Basis (RV + KV + PV)", -vorsorge_basis)
+    basis_label = "− Vorsorgeaufwendungen Basis (RV + KV + PV" + \
+        (" + Rürup/Basisrente" if spar["vorsorge_basis"] else "") + ")"
+    step(basis_label, -vorsorge_basis)
 
     # § 10 Abs. 1 Nr. 3a + Abs. 4 EStG: "sonstige Vorsorgeaufwendungen"
     # (private Haftpflicht, Berufsunfähigkeit, Risikoleben u. Ä.) sind NUR
@@ -181,25 +288,38 @@ def berechne_veranlagung(docs: list, cfg: dict, interview: dict) -> dict:
     agb_belege = sum(_num(d.get("betrag_eur")) for d in docs
                      if d.get("kategorie") == "krankheitskosten")
     agb = agb_belege + spar["agb"]
-    zumutbar = round(summe_einkuenfte * (0.04 if zusammen else 0.06), 2)
+    kinderzahl = int(_num(interview.get("kinder_anzahl")))
+    zumutbar = _zumutbare_belastung(summe_einkuenfte, zusammen, kinderzahl, cfg)
     agb_wirksam = max(0.0, agb - zumutbar)
     if agb > 0:
         step(f"− Außergew. Belastungen über zumutbarer Grenze "
-             f"(~{zumutbar:,.0f} €)".replace(",", "."), -agb_wirksam)
+             f"(~{zumutbar:,.0f} €, § 33 Abs. 3 EStG)".replace(",", "."),
+             -agb_wirksam)
 
-    zve = max(0.0, summe_einkuenfte - vorsorge - sa - agb_wirksam)
+    # ---------- 5b) Behinderten-/Pflege-Pauschbetrag, § 33a-Unterhalt
+    # (§ 33b, § 33a EStG) – anders als Krankheitskosten OHNE Kürzung um
+    # die zumutbare Belastung, deshalb ein eigener, ungekürzter Abzug.
+    pauschbetraege_agb, pauschbetraege_hinweise = \
+        _behinderten_pflege_unterhalt(interview, cfg)
+    if pauschbetraege_agb:
+        step("− Behinderten-/Pflege-Pauschbetrag, § 33a-Unterhalt "
+             "(ohne zumutbare Belastung)", -pauschbetraege_agb)
+        b["warnhinweise"].extend(pauschbetraege_hinweise)
+
+    zve = max(0.0, summe_einkuenfte - vorsorge - sa - agb_wirksam
+              - pauschbetraege_agb)
     step("= zu versteuerndes Einkommen (zvE)", zve)
     # agb_wirksam hängt (über "zumutbar") minimal von summe_einkuenfte ab –
     # für die Fünftelregelung-Vergleichsgröße vernachlässigbar genau genug,
     # ohne Beihilfe im zvE nachgebildet:
     zve_ohne_beihilfe = max(
-        0.0, summe_einkuenfte_ohne_beihilfe - vorsorge - sa - agb_wirksam)
+        0.0, summe_einkuenfte_ohne_beihilfe - vorsorge - sa - agb_wirksam
+        - pauschbetraege_agb)
 
     # ---------- 6) Tarifliche ESt (Splitting), ggf. mit Fünftelregelung
     # (§ 34 EStG) auf die Übergangsbeihilfe – das Finanzamt wendet die
     # günstigere Variante ohnehin von Amts wegen an.
-    est_normal = (2 * est_nach_tarif(zve / 2, cfg)) if zusammen \
-        else est_nach_tarif(zve, cfg)
+    est_normal = _tarif(zve, zusammen, cfg)
     est = est_normal
     if beihilfe_gesamt > 0:
         fuenftel = fuenftelregelung(zve_ohne_beihilfe, beihilfe_gesamt,
@@ -225,6 +345,47 @@ def berechne_veranlagung(docs: list, cfg: dict, interview: dict) -> dict:
     else:
         step(f"Tarifliche Einkommensteuer "
              f"({'Splitting' if zusammen else 'Grundtarif'})", est)
+
+    # ---------- 6b) Riester-Günstigerprüfung (§ 10a EStG): Das Finanzamt
+    # vergleicht automatisch die Steuerersparnis durch den vollen
+    # Sonderausgabenabzug mit der bereits gutgeschriebenen Zulage – nur
+    # der ÜBERSTEIGENDE Betrag wird zusätzlich per Bescheid erstattet,
+    # sonst bleibt es bei der Zulage (kein Bescheid-Effekt). Vereinfachte
+    # Grenzbetrachtung auf Basis des Grundtarifs (bei gleichzeitiger
+    # Fünftelregelung eine leichte Näherung).
+    riester_beitrag = sum(_num(interview.get(f"riester_beitrag_{p}"))
+                          for p in aktive)
+    if riester_beitrag > 0:
+        abzugsbetrag = min(riester_beitrag,
+                           cfg["riester_max_beitrag"] * len(aktive))
+        kinder_ab_2008 = int(_num(interview.get("riester_kinder_ab_2008")))
+        kinder_vor_2008 = int(_num(interview.get("riester_kinder_vor_2008")))
+        grundzulage = cfg["riester_grundzulage"] * sum(
+            1 for p in aktive if _num(interview.get(f"riester_beitrag_{p}")) > 0)
+        kinderzulage = (kinder_ab_2008 * cfg["riester_kinderzulage_ab_2008"]
+                        + kinder_vor_2008 * cfg["riester_kinderzulage_vor_2008"])
+        zulage = grundzulage + kinderzulage
+        ersparnis = round(
+            est - _tarif(max(0.0, zve - abzugsbetrag), zusammen, cfg), 2)
+        zusatzvorteil = max(0.0, round(ersparnis - zulage, 2))
+        if zusatzvorteil:
+            est -= zusatzvorteil
+            step("− Riester-Günstigerprüfung: Steuerersparnis über die "
+                 "Zulage hinaus (§ 10a EStG)", -zusatzvorteil)
+            b["warnhinweise"].append(
+                f"Riester lohnt sich über die Zulage hinaus: "
+                f"Sonderausgabenabzug spart ca. {ersparnis:.2f} € "
+                f"Steuern, die Zulage ({zulage:.2f} €) allein wäre "
+                f"weniger wert – die Differenz kommt zusätzlich per "
+                "Steuerbescheid (Anlage AV).")
+        else:
+            b["warnhinweise"].append(
+                f"Riester: Die Zulage ({zulage:.2f} €) ist mindestens so "
+                f"hoch wie die Steuerersparnis durch den Sonderausgaben-"
+                f"abzug (ca. {ersparnis:.2f} €) – das Finanzamt gewährt "
+                "dann nur die Zulage, kein zusätzlicher Bescheid-Effekt "
+                "(Günstigerprüfung § 10a Abs. 2 EStG). Trotzdem lohnt "
+                "sich Riester meist – die Zulage bleibt in jedem Fall.")
 
     # ---------- 7) Direkte Steuerermäßigungen
     handwerker_belege = sum(_ed(d, "arbeitskosten", d.get("betrag_eur"))
@@ -307,11 +468,8 @@ def berechne_veranlagung(docs: list, cfg: dict, interview: dict) -> dict:
     # die günstigere Variante an.
     kap_stpfl_bemessung = max(0.0, ertraege - pb_kap)
     if interview.get("guenstigerpruefung", True) and kap_stpfl_bemessung > 0:
-        def _tarif(z):
-            return (2 * est_nach_tarif(z / 2, cfg)) if zusammen \
-                else est_nach_tarif(z, cfg)
-        est_ohne_kap = _tarif(zve)
-        est_mit_kap = _tarif(zve + kap_stpfl_bemessung)
+        est_ohne_kap = _tarif(zve, zusammen, cfg)
+        est_mit_kap = _tarif(zve + kap_stpfl_bemessung, zusammen, cfg)
         mehrsteuer_grundtarif = round(est_mit_kap - est_ohne_kap, 2)
         abgeltung_betrag = round(kap_stpfl_bemessung * 0.25 * 1.055, 2)
         if mehrsteuer_grundtarif < abgeltung_betrag:

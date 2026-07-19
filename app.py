@@ -238,6 +238,12 @@ with tab_check:
                           index=1 if iv.get("hat_kinder") else 0,
                           horizontal=True)
         iv["hat_kinder"] = kinder == "Ja"
+        if iv["hat_kinder"]:
+            iv["kinder_anzahl"] = st.number_input(
+                "Anzahl Kinder (Kindergeld-Anspruch)", 0, 15,
+                int(iv.get("kinder_anzahl") or 0),
+                help="Wirkt auf die zumutbare Belastung (§ 33 Abs. 3 EStG) "
+                     "und die Riester-Kinderzulage.")
     with c2:
         iv["hat_bundeswehr"] = st.checkbox(
             "Übergangsgebührnisse Bundeswehr (2. Arbeitsverhältnis)?",
@@ -280,6 +286,72 @@ with tab_check:
         iv["verlustvortrag_kap_sonstige"] = v3.number_input(
             "KAP sonstige Verluste (€)", 0.0, 10_000_000.0,
             float(iv.get("verlustvortrag_kap_sonstige") or 0.0), step=100.0)
+
+    with st.expander("🦽 Behinderung, Pflege & Unterhalt (§ 33b, § 33a EStG "
+                     "– Pauschbeträge OHNE zumutbare Belastung)"):
+        st.caption("Diese Beträge wirken sofort und ungekürzt – anders als "
+                   "normale Krankheitskosten im Spar-Check.")
+        bcols = st.columns(len(aktive))
+        gdb_stufen = [0, 20, 30, 40, 50, 60, 70, 80, 90, 100]
+        for col, p_key in zip(bcols, aktive):
+            with col:
+                st.markdown(f"**{personen[p_key]}**")
+                iv[f"gdb_{p_key}"] = st.selectbox(
+                    "Grad der Behinderung (GdB)", gdb_stufen,
+                    gdb_stufen.index(int(iv.get(f"gdb_{p_key}") or 0))
+                    if int(iv.get(f"gdb_{p_key}") or 0) in gdb_stufen else 0,
+                    key=f"gdb_sel_{p_key}",
+                    help="Ab GdB 20 gibt es einen Pauschbetrag ohne "
+                         "Einzelnachweis (§ 33b EStG).")
+                if iv[f"gdb_{p_key}"] >= 20:
+                    iv[f"gdb_hilflos_blind_{p_key}"] = st.checkbox(
+                        "Merkzeichen H/Bl/TBl (hilflos/blind)?",
+                        value=bool(iv.get(f"gdb_hilflos_blind_{p_key}")),
+                        key=f"hb_gdb_{p_key}",
+                        help="Ersetzt den GdB-Pauschbetrag durch den "
+                             "erhöhten Pauschbetrag von 7.400 €.")
+        st.markdown("**Pflege eines Angehörigen (unentgeltlich, häuslich)**")
+        pflege_stufen = [0, 2, 3, 4, 5]
+        iv["pflegegrad_angehoeriger"] = st.selectbox(
+            "Pflegegrad der gepflegten Person", pflege_stufen,
+            pflege_stufen.index(int(iv.get("pflegegrad_angehoeriger") or 0))
+            if int(iv.get("pflegegrad_angehoeriger") or 0) in pflege_stufen
+            else 0, help="0 = keine Pflege. Ab Pflegegrad 2 gibt es einen "
+                         "Pauschbetrag (§ 33b Abs. 6 EStG).")
+        st.markdown("**Unterhaltsleistungen an bedürftige Personen "
+                   "(§ 33a EStG)**")
+        u1, u2 = st.columns(2)
+        iv["unterhalt_betrag"] = u1.number_input(
+            "Gezahlter Unterhalt (€/Jahr)", 0.0, 100_000.0,
+            float(iv.get("unterhalt_betrag") or 0.0), step=100.0)
+        iv["unterhalt_eigene_einkuenfte"] = u2.number_input(
+            "Eigene Einkünfte/Bezüge der unterstützten Person (€/Jahr)",
+            0.0, 100_000.0,
+            float(iv.get("unterhalt_eigene_einkuenfte") or 0.0), step=100.0,
+            help="Übersteigen diese 624 €/Jahr, wird der übersteigende "
+                 "Betrag vom Höchstbetrag abgezogen.")
+
+    with st.expander("💰 Riester-Rente (Anlage AV, § 10a EStG – "
+                     "Günstigerprüfung Zulage vs. Sonderausgabenabzug)"):
+        rcols = st.columns(len(aktive))
+        for col, p_key in zip(rcols, aktive):
+            iv[f"riester_beitrag_{p_key}"] = col.number_input(
+                f"Eigenbeitrag {personen[p_key]} (€/Jahr, inkl. Zulage)",
+                0.0, 10_000.0,
+                float(iv.get(f"riester_beitrag_{p_key}") or 0.0), step=10.0,
+                key=f"riester_b_{p_key}")
+        rk1, rk2 = st.columns(2)
+        iv["riester_kinder_ab_2008"] = rk1.number_input(
+            "Kinder mit Kinderzulage, geboren AB 2008", 0, 15,
+            int(iv.get("riester_kinder_ab_2008") or 0))
+        iv["riester_kinder_vor_2008"] = rk2.number_input(
+            "Kinder mit Kinderzulage, geboren VOR 2008", 0, 15,
+            int(iv.get("riester_kinder_vor_2008") or 0))
+        st.caption("Das Finanzamt vergleicht automatisch die Steuerersparnis "
+                  "durch den Sonderausgabenabzug mit der bereits "
+                  "gutgeschriebenen Zulage und zahlt nur den übersteigenden "
+                  "Betrag zusätzlich aus (Ergebnis im Rechenweg, Tab "
+                  "'Ergebnis & ELSTER').")
 
     st.divider()
     st.subheader("Automatische Prüfung")

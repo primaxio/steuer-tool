@@ -94,6 +94,10 @@ Kategoriespezifische Felder für "extrahierte_daten":
   Rechnung = "betrieb_einnahme" nur, wenn der Nutzer der Rechnungssteller
   ist (Ausgangsrechnung/Gutschrift AN ihn); Belege, die er selbst bezahlt
   hat, sind "betrieb_ausgabe".
+- Rentenbezugsmitteilung (Deutsche Rentenversicherung, Rürup-Anbieter):
+  jahresbetrag_rente (Brutto-Jahresbetrag der Rente), rentenbeginn_jahr
+  (Jahr, in dem die Rente ERSTMALIG bezogen wurde – steht meist als
+  "Rentenbeginn" oder im Betreff, NICHT das Jahr der Mitteilung selbst!).
 
 Regel für "steuerjahr" (WICHTIG für die automatische Sortierung):
 - Maßgeblich ist das ZAHLUNGS-/Zuflussjahr (§ 11 EStG, Abflussprinzip),

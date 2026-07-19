@@ -60,10 +60,12 @@ ITEMS = [
          titel="Spenden (Geld & Sachspenden)",
          tipp="Bis 300 € je Spende reicht der Kontoauszug als Nachweis – "
               "auch Vereinsbeiträge gemeinnütziger Vereine zählen oft."),
-    dict(id="riester_ruerup", bucket="sa", pro_person=False,
-         titel="Riester-/Rürup-Beiträge",
-         tipp="Riester: bis 2.100 € inkl. Zulagen (Anlage AV). Rürup wird "
-              "über den Vorsorgeaufwand berücksichtigt."),
+    dict(id="ruerup_basisrente", bucket="vorsorge_basis", pro_person=False,
+         titel="Rürup-/Basisrente-Beiträge",
+         tipp="Seit 2023 zu 100 % abzugsfähig wie die gesetzliche "
+              "Rentenversicherung – kein 1.900-€-Deckel. Riester läuft "
+              "separat über den eigenen Fragebogen-Bereich (Anlage AV, "
+              "Günstigerprüfung Zulage vs. Sonderausgabenabzug)."),
     dict(id="kinderbetreuung", bucket="sa", pro_person=False,
          titel="Kinderbetreuung (Kita, Hort, Tagesmutter, Au-pair)",
          tipp="Abziehbar je Kind bis 14 J. – Rechnung + Überweisung nötig, "
@@ -103,20 +105,22 @@ ITEMS = [
          tipp="Wirkt erst über der zumutbaren Eigenbelastung – Kosten "
               "deshalb möglichst in EINEM Jahr bündeln (z. B. Zahn-OP + "
               "Brille zusammen)."),
-    dict(id="behinderung_pflege", bucket="agb", pro_person=False,
-         titel="Behinderten-/Pflege-Pauschbetrag, Unterstützung Angehöriger",
-         tipp="Ab GdB 20 gibt es Pauschbeträge ohne Einzelnachweis; Pflege "
-              "von Angehörigen bringt bis 1.800 € Pauschale."),
 ]
+# Behinderten-/Pflege-Pauschbetrag und § 33a-Unterhalt sind KEINE
+# Betrags-Schätzungen mehr, sondern echte Berechnungen mit eigenen
+# Fragebogen-Feldern (GdB-Stufe, Pflegegrad, Unterhaltsempfänger) – siehe
+# app.py-Expander "Behinderung, Pflege & Unterhalt" und
+# veranlagung.py::_agb_pauschbetraege_ohne_zumutbare_grenze().
 
 GRUPPEN = [
     ("wk", "👜 Werbungskosten – je Person (eigener 1.230 €-Pauschbetrag!)"),
     ("sa", "🎁 Sonderausgaben (gemeinsam)"),
+    ("vorsorge_basis", "🩺 Rürup/Basisrente (voll abzugsfähig)"),
     ("parteispenden", "🏛️ Parteispenden – 50 % direkt von der Steuer"),
     ("h35a_handwerker", "🔧 Handwerker (§ 35a – 20 % direkt von der Steuer)"),
     ("h35a_haushalt", "🏠 Haushaltsnahe Dienstleistungen (§ 35a)"),
     ("h35a_minijob", "🧾 Haushalts-Minijob (§ 35a)"),
-    ("agb", "🏥 Außergewöhnliche Belastungen"),
+    ("agb", "🏥 Außergewöhnliche Belastungen (Krankheitskosten)"),
 ]
 
 
@@ -172,7 +176,7 @@ def summen(interview: dict) -> dict:
     spar = interview.get("spar", {})
     out = {"wk_P1": 0.0, "wk_P2": 0.0, "sa": 0.0, "parteispenden": 0.0,
            "h35a_handwerker": 0.0, "h35a_haushalt": 0.0,
-           "h35a_minijob": 0.0, "agb": 0.0}
+           "h35a_minijob": 0.0, "agb": 0.0, "vorsorge_basis": 0.0}
     for item in ITEMS:
         e = spar.get(item["id"], {})
         if not e.get("aktiv"):

@@ -160,3 +160,102 @@ Damit sind alle A.2/A.3-Funde aus diesem Audit abgearbeitet (mit
 Ausnahme von M9, s. o.). Neue, tiefere Funde (z. B. aus B.1 "Niedrig":
 Anlage AV/R/V, Behinderten-Pauschbetrag) sind nicht Teil dieser Runde
 und bräuchten eine eigene Freigabe.
+
+---
+
+## Status-Update 2 (19.07.2026, nach expliziter Freigabe "Alles machen und
+## nochmal im Loop auf Fehler testen und gegenkorrigieren")
+
+Alle B.1-"Niedrig"-Punkte sowie die restlichen "Bekannte Grenzen"-Backlog-
+Ideen wurden bewertet und – soweit mit vertretbarem Aufwand seriös
+umsetzbar – implementiert, jeweils mit eigener Regressionstest-Datei
+(`tests/test_neue_anlagen.py`, `tests/test_belegablage.py`,
+`tests/test_crypto_fifo.py`):
+
+- **agB Zumutbare Belastung (§ 33 Abs. 3 EStG)**: Der bisherige flache
+  4-%/6-%-Näherungswert wurde durch die echte dreistufige Berechnung
+  (BFH VI R 75/14, gestaffelt nach Einkommenshöhe UND Familienstand/
+  Kinderzahl) ersetzt. Neues Fragebogen-Feld `kinder_anzahl`.
+- **Behinderten-/Pflege-Pauschbetrag, § 33a-Unterhalt (§ 33b, § 33a
+  EStG)**: Bisher nur ein Tipp-Text im Spar-Check ohne echte Berechnung –
+  jetzt eine vollständige Pauschbetragstabelle (GdB 20–100, Merkzeichen
+  H/Bl/TBl, Pflegegrad 2–5) und eine echte § 33a-Berechnung
+  (Höchstbetrag = Grundfreibetrag, Kürzung um eigene Einkünfte des
+  Empfängers über 624 €), alle OHNE Kürzung um die zumutbare Belastung
+  (das ist der gesetzliche Unterschied zu normalen Krankheitskosten).
+- **Anlage AV (Riester, § 10a EStG)**: Neuer Fragebogen-Bereich mit
+  echter Günstigerprüfung (Sonderausgabenabzug vs. Zulage inkl.
+  Kinderzulage ab/vor Geburtsjahrgang 2008) – vorher gab es nur ein
+  pauschales Freitext-Feld im Spar-Check ohne Berechnung.
+- **Anlage R (Renten, § 22 Nr. 1 EStG)**: Komplett neue Kategorie
+  "rentenbezugsmitteilung" + `core/rente.py` mit der vollständigen
+  Besteuerungsanteil-Kohortentabelle (1990–2058, inkl. der durch das
+  Wachstumschancengesetz 2024 verlangsamten Steigerung ab 2023). Bei
+  fehlendem Rentenbeginn-Jahr konservativ 100 % Besteuerungsanteil
+  (keine Unterschätzung) – ein früher Testlauf deckte hier einen echten
+  Bug auf (Fallback landete fälschlich bei 50 % statt 100 %, siehe
+  `tests/test_neue_anlagen.py::test_rente_ohne_rentenbeginn_jahr_...`),
+  der vor dem Commit korrigiert wurde.
+- **Anlage V (Vermietung)**: War strukturell schon vorhanden
+  (`betrieb.py` unterstützte `art="vermietung"` bereits vollständig,
+  inkl. korrektem Anlage-V-Label im Export) – ergänzt um einen Hinweis
+  zu den GEBÄUDE-AfA-Sätzen (§ 7 Abs. 4 EStG: 2 %/2,5 %/3 % je nach
+  Baujahr, nicht frei wählbar wie bei sonstigen Anlagegütern).
+- **Rürup/Basisrente**: Aus dem alten, undifferenzierten
+  "Riester-/Rürup"-Sammelposten des Spar-Checks herausgelöst und korrekt
+  als voll abzugsfähige Basisvorsorge (wie die gesetzliche RV, kein
+  1.900-€-Deckel) eingeordnet – vorher wurde Rürup fälschlich implizit
+  wie eine gedeckelte "sonstige Vorsorgeaufwendung" behandelt.
+- **Belegablage-Persistenz**: Hochgeladene Originaldateien werden jetzt
+  als Base64 im Dokument gespeichert (`doc["_bytes"]`/`doc["_mime"]`),
+  überleben Speichern/Laden des Projektstands und sind per
+  Download-Button wieder abrufbar – vorher gingen die Originaldateien
+  nach der Analyse verloren (nur Metadaten blieben). `_bytes` wird
+  bewusst aus dem JSON-Export und dem Chat-Kontext herausgefiltert
+  (Größe/Redundanz).
+- **Krypto: Haltefrist-Verknüpfung bei Wallet-Transfers**: Die FIFO-
+  Engine (`core/crypto.py`) verknüpft jetzt automatisch
+  transfer_out/transfer_in-Paare zwischen EIGENEN Wallets desselben
+  Inhabers (unterschiedliches Depot, zeitlich passend, empfangene Menge
+  ≤ versendete Menge wegen Netzwerkgebühr) und übernimmt Haltefrist UND
+  Kostenbasis der Ursprungs-Lots ins Ziel-Depot – vorher begann die
+  Haltefrist beim reinen Wallet-Wechsel fälschlich neu. Funktioniert
+  auch über mehrere unterschiedlich alte Lots hinweg (jedes Sub-Lot
+  behält sein eigenes Originaldatum) und bleibt bei unterschiedlichen
+  Inhabern bewusst UNverknüpft. Neue Testdatei `test_crypto_fifo.py`
+  deckt jetzt erstmals auch die Basis-FIFO-Logik ab (bisher ungetestet).
+
+### Bewusst NICHT umgesetzt (technisch nicht seriös möglich oder Scope-Sprung)
+
+- **Bilanzierung (§ 4 Abs. 1/§ 5 EStG)**: Doppelte Buchführung mit
+  Bilanz/GuV/Anlagenspiegel ist ein fundamental anderes
+  Rechnungslegungssystem als die EÜR, das erst ab hohen Umsatz-/
+  Gewinnschwellen (i. d. R. > 800.000 €/80.000 €, HGB-Kaufmannseigen-
+  schaft) überhaupt greift – für das Nebengewerbe-Profil dieses Tools
+  (Kleinunternehmer-Schwellen, EÜR) irrelevant und ein Scope-Sprung
+  auf ein komplett neues Rechnungslegungsmodul, keine Erweiterung des
+  bestehenden EÜR-Moduls.
+- **USt-Voranmeldung**: Umsatzsteuer-Voranmeldungen sind ein eigenes,
+  von der Einkommensteuererklärung (dem gesamten Zweck dieses Tools)
+  unabhängiges Verfahren mit eigenem Meldezeitraum/-rhythmus
+  (monatlich/vierteljährlich, ELSTER-USt-VA statt Einkommensteuer) –
+  nur relevant für regelbesteuerte Unternehmer, die das Tool ohnehin
+  schon zum Steuerberater schickt (`kleinunternehmer_19ustg`-Warnungen
+  in betrieb.py). Eigenständiges Modul außerhalb des Werkzeugzwecks.
+- **eToro-Optimizer für offene Positionen**: eToro bietet für Retail-
+  Nutzer keine öffentliche API zum Abruf offener Positionen (anders als
+  z. B. Coinbase) – ohne diese Datenquelle kann der Optimizer (Halte-
+  Empfehlungen für offene Lots) für eToro-Depots strukturell nicht
+  vervollständigt werden. Kein Implementierungsdefizit, sondern eine
+  externe Datenverfügbarkeits-Grenze.
+- **Connectors Live-Test** (`core/connectors/coinbase_api.py`,
+  `core/connectors/base_chain.py`): Weiterhin ⚠️ LIVE UNGETESTET – ein
+  echter Test erfordert einen echten, live gültigen API-Key (Coinbase
+  CDP-Key bzw. Basescan-Key) mit Zugriff auf ein reales Konto/eine
+  reale Wallet, über die dieses Environment nicht verfügt. Kann nicht
+  seriös simuliert werden, ohne den Sinn des Tests (Verifikation gegen
+  die ECHTE API) zu verfehlen.
+
+Alle Regressionstests (`for f in tests/test_*.py; do python "$f"; done`)
+und `ruff check .` laufen grün. Details zur genauen Implementierung siehe
+CLAUDE.md.

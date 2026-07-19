@@ -133,6 +133,17 @@ def _hinweise_fuer_betrieb(betrieb: Betrieb, jahr: int, cfg: dict,
             "strukturell gleich (Einnahmen − Werbungskosten − AfA), damit "
             "du eine Schätzung hast. Keine Gewerbesteuer, i. d. R. auch "
             "keine Umsatzsteuer (§ 4 Nr. 12 UStG bei Wohnraumvermietung).")
+        hinweise.append(
+            "Gebäude-AfA (§ 7 Abs. 4 EStG) folgt EIGENEN festen Sätzen "
+            "nach Fertigstellungsjahr – NICHT frei wählbar wie bei "
+            "sonstigen Anlagegütern: 2 % p. a. (50 Jahre ND) bei "
+            "Fertigstellung nach 1924, 2,5 % (40 Jahre) bei Fertigstellung "
+            "vor 1925, 3 % (rund 33 Jahre) bei Neubauten mit "
+            "Fertigstellung ab 2023 (Wachstumschancengesetz). Nur der "
+            "Gebäudeanteil ist abschreibbar, NICHT der Grund-und-Boden-"
+            "Anteil (i. d. R. per Kaufpreisaufteilung/Bodenrichtwert "
+            "ermitteln) – bei der AfA-Position entsprechend die "
+            "Nutzungsdauer manuell auf 50/40/33 Jahre setzen.")
     elif betrieb.kleinunternehmer_19ustg:
         hinweise.append(
             "§ 19 UStG Kleinunternehmer: keine Umsatzsteuer auf Rechnungen "
