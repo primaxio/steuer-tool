@@ -27,9 +27,20 @@ def berechne_veranlagung(docs: list, cfg: dict, interview: dict) -> dict:
 
     # ---------- 1) Einkünfte aus nichtselbständiger Arbeit je Person
     summe_einkuenfte = 0.0
+    uebergangsbeihilfe_docs = [d for d in docs
+                              if d.get("kategorie") == "uebergangsbeihilfe"]
     for p in aktive:
         brutto = sum(_ed(d, "bruttoarbeitslohn", d.get("betrag_eur"))
                      for d in lsb if d.get("inhaber", "P1") == p)
+        beihilfe = sum(_num(d.get("betrag_eur")) for d in uebergangsbeihilfe_docs
+                       if d.get("inhaber", "P1") == p)
+        if beihilfe:
+            # Konservativ voll versteuert (Regeltarif) – die ggf. günstigere
+            # Fünftelregelung (§ 34 EStG) wird hier NICHT berechnet, siehe
+            # Hinweis in checks.py. Lieber zu viel als zu wenig Steuer schätzen.
+            brutto += beihilfe
+            step(f"+ Übergangsbeihilfe {p} (voll versteuert, "
+                 "Fünftelregelung ungeprüft)", beihilfe)
         ep = entfernungspauschale(
             _num(interview.get(f"entfernung_km_{p}")),
             int(_num(interview.get(f"arbeitstage_{p}"))), cfg)
@@ -49,6 +60,19 @@ def berechne_veranlagung(docs: list, cfg: dict, interview: dict) -> dict:
     krypto_stpfl = sum(
         a.get("steuerpflichtiger_betrag", 0) + a.get("rewards_steuerpflichtig", 0)
         for a in crypto["pro_person"].values())
+    if not crypto["pro_person"]:
+        # Kein FIFO-Engine-Ergebnis vorhanden (Krypto-Tab nicht genutzt) –
+        # Fallback auf hochgeladene krypto_report-Dokumente, sonst würde
+        # dieser Gewinn in der Schätzung fehlen (steht aber in build_summary!).
+        krypto_docs = [d for d in docs if d.get("kategorie") == "krypto_report"]
+        krypto_stpfl = sum(_ed(d, "gewinn_steuerpflichtig", d.get("betrag_eur"))
+                           for d in krypto_docs)
+        if krypto_stpfl:
+            b["warnhinweise"].append(
+                "Krypto-Report-Dokument(e) ohne Nutzung des Krypto-Tabs "
+                "(FIFO-Engine) erkannt – Gewinn wurde als grobe Schätzung "
+                "aus dem Beleg übernommen. Für eine genaue, walletbezogene "
+                "FIFO-Berechnung den Krypto-Tab nutzen.")
     if krypto_stpfl:
         step("+ Steuerpflichtige Krypto-Einkünfte (Anlage SO)", krypto_stpfl)
     summe_einkuenfte += krypto_stpfl

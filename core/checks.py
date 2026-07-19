@@ -65,6 +65,14 @@ def run_checks(docs: list, cfg: dict, interview: dict) -> list:
             "Es fehlt die Bescheinigung über die Übergangsgebührnisse der "
             "Bundeswehr (BVA). Diese sind voll steuerpflichtiger Arbeitslohn "
             "und müssen als zweites Arbeitsverhältnis in Anlage N erfasst werden.")
+    if _docs_by_cat(docs, "uebergangsbeihilfe"):
+        add("hinweis",
+            "Übergangsbeihilfe erkannt: Der Betrag wurde in der Schätzung "
+            "voll versteuert eingerechnet. Prüfe die Fünftelregelung "
+            "(§ 34 EStG, ermäßigte Besteuerung für Vergütung mehrjähriger "
+            "Tätigkeit) – das Tool berechnet sie NICHT automatisch, sie kann "
+            "aber deutlich Steuer sparen. Bei Unsicherheit Steuerberater/"
+            "Lohnsteuerhilfeverein fragen.")
     from collections import Counter
     zivil_je_person = Counter(d.get("inhaber", "P1") for d in lsb_zivil)
     bw_je_person = Counter(d.get("inhaber", "P1") for d in lsb_bw)
@@ -118,9 +126,9 @@ def run_checks(docs: list, cfg: dict, interview: dict) -> list:
     zusammen = bool(interview.get("zusammenveranlagung"))
     kap_docs = _docs_by_cat(docs, "steuerbescheinigung_bank")
     if kap_docs:
-        fsa = sum(_num(d["extrahierte_daten"].get(
+        fsa = sum(_num(d.get("extrahierte_daten", {}).get(
             "in_anspruch_genommener_freistellungsauftrag")) for d in kap_docs)
-        ertraege = sum(_num(d["extrahierte_daten"].get(
+        ertraege = sum(_num(d.get("extrahierte_daten", {}).get(
             "kapitalertraege_zeile7", d.get("betrag_eur"))) for d in kap_docs)
         pb = cfg["sparer_pauschbetrag"] * (2 if zusammen else 1)
         if zusammen:
@@ -133,7 +141,7 @@ def run_checks(docs: list, cfg: dict, interview: dict) -> list:
                 f"Sparer-Pauschbetrag ({pb:.0f} €) wurde laut Bescheinigungen "
                 f"nur mit {fsa:.2f} € ausgeschöpft. Über die Anlage KAP holst "
                 "du dir zu viel gezahlte Kapitalertragsteuer zurück.")
-        quellensteuer = sum(_num(d["extrahierte_daten"].get(
+        quellensteuer = sum(_num(d.get("extrahierte_daten", {}).get(
             "auslaendische_quellensteuer")) for d in kap_docs)
         if quellensteuer > 0:
             add("hinweis",
@@ -158,7 +166,7 @@ def run_checks(docs: list, cfg: dict, interview: dict) -> list:
             add("warnung", f"Krypto-Import: {w}")
     krypto = _docs_by_cat(docs, "krypto_report")
     if krypto and not crypto_engine:
-        gewinn = sum(_num(d["extrahierte_daten"].get(
+        gewinn = sum(_num(d.get("extrahierte_daten", {}).get(
             "gewinn_steuerpflichtig", d.get("betrag_eur"))) for d in krypto)
         freigrenze = cfg["freigrenze_private_veraeusserung"]
         if 0 < gewinn < freigrenze:
@@ -185,8 +193,8 @@ def run_checks(docs: list, cfg: dict, interview: dict) -> list:
 
     # ---------- Automatik-Bestätigungen & Kontrollwerte ----------
     for d in _docs_by_cat(docs, "nebenkostenabrechnung"):
-        sh = _num(d["extrahierte_daten"].get("summe_haushaltsnah"))
-        sw = _num(d["extrahierte_daten"].get("summe_handwerker"))
+        sh = _num(d.get("extrahierte_daten", {}).get("summe_haushaltsnah"))
+        sw = _num(d.get("extrahierte_daten", {}).get("summe_handwerker"))
         if sh or sw:
             add("hinweis",
                 f"'{d['dateiname']}': § 35a-Posten automatisch übernommen – "
@@ -199,7 +207,7 @@ def run_checks(docs: list, cfg: dict, interview: dict) -> list:
                 "unscharf? Ggf. neu fotografieren oder manuell im "
                 "Spar-Check eintragen.")
     for d in _docs_by_cat(docs, "broker_steuerbericht"):
-        so_wert = _num(d["extrahierte_daten"].get("so_krypto_gewinn"))
+        so_wert = _num(d.get("extrahierte_daten", {}).get("so_krypto_gewinn"))
         if so_wert and interview.get("_crypto"):
             add("hinweis",
                 f"Kontrollwert {d.get('aussteller') or d['dateiname']}: "
@@ -278,8 +286,8 @@ def run_checks(docs: list, cfg: dict, interview: dict) -> list:
     banken = {(d.get("aussteller") or "").lower()
               for d in _docs_by_cat(docs, "steuerbescheinigung_bank")}
     verluste_kap = any(
-        _num(d["extrahierte_daten"].get("verlust_aktien")) > 0 or
-        _num(d["extrahierte_daten"].get("verlust_sonstige")) > 0
+        _num(d.get("extrahierte_daten", {}).get("verlust_aktien")) > 0 or
+        _num(d.get("extrahierte_daten", {}).get("verlust_sonstige")) > 0
         for d in _docs_by_cat(docs, "steuerbescheinigung_bank"))
     if len(banken) > 1 and verluste_kap:
         add("warnung",

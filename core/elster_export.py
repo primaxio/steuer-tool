@@ -81,9 +81,14 @@ def build_summary(docs: list, cfg: dict, interview: dict) -> dict:
         "kap_aktien": _num(interview.get("verlustvortrag_kap_aktien")),
         "kap_sonstige": _num(interview.get("verlustvortrag_kap_sonstige")),
     }
+    uebergangsbeihilfe = [{
+        "datei": d["dateiname"], "inhaber": d.get("inhaber", "P1"),
+        "betrag": _num(d.get("betrag_eur"))}
+        for d in cat(docs, "uebergangsbeihilfe")]
     s["anlagen"]["N"] = {
         "arbeitsverhaeltnisse": n_eintraege,
         "werbungskosten_pro_person": wk_pro_person,
+        "uebergangsbeihilfe": uebergangsbeihilfe,
     }
 
     # ---------- Anlage KAP ----------
@@ -284,6 +289,21 @@ def render_elster_help(s: dict, erklaeren: bool = True) -> str:
                 ("- ✅ Einzelnachweis lohnt sich – Werte eintragen!"
                  if wk["einzelnachweis_lohnt"] else
                  "- ℹ️ Unter dem Pauschbetrag – greift automatisch."),
+                "",
+            ]
+        if n.get("uebergangsbeihilfe"):
+            out.append("### Übergangsbeihilfe (Einmalzahlung Bundeswehr)")
+            for ub in n["uebergangsbeihilfe"]:
+                out.append(f"- `{ub['datei']}` ({ub['inhaber']}): "
+                           f"{e(ub['betrag'])} – als zusätzlicher Arbeitslohn "
+                           "in die Schätzung eingerechnet (voll versteuert).")
+            out += [
+                "- ⚠️ **Fünftelregelung (§ 34 EStG) prüfen!** Bei Vergütung für "
+                "mehrjährige Tätigkeit kann die ermäßigte Besteuerung viel "
+                "Geld sparen – dieses Tool berechnet sie NICHT automatisch. "
+                "In ELSTER die Zeile 'ermäßigt zu besteuernde Entschädigung' "
+                "ausfüllen bzw. einen Steuerberater/Lohnsteuerhilfeverein "
+                "hinzuziehen.",
                 "",
             ]
 
