@@ -71,11 +71,19 @@ with st.sidebar:
                                 index=year_options.index(DEFAULT_YEAR))
     cfg = get_config(int(year))
 
-    api_key = st.text_input(
-        "Anthropic API-Key", type="password",
-        value=os.environ.get("ANTHROPIC_API_KEY", ""),
-        help="Wird nur lokal verwendet. Alternativ Umgebungsvariable "
-             "ANTHROPIC_API_KEY setzen.")
+    try:
+        _secret_key = st.secrets.get("ANTHROPIC_API_KEY")
+    except Exception:  # noqa: BLE001 – keine secrets.toml vorhanden
+        _secret_key = None
+    _vorkonfigurierter_key = os.environ.get("ANTHROPIC_API_KEY") or _secret_key
+    if _vorkonfigurierter_key:
+        api_key = _vorkonfigurierter_key
+        st.caption("✅ Anthropic API-Key ist konfiguriert.")
+    else:
+        api_key = st.text_input(
+            "Anthropic API-Key", type="password",
+            help="Wird nur lokal verwendet. Alternativ Umgebungsvariable "
+                 "ANTHROPIC_API_KEY setzen.")
     if not einfacher_modus:
         model = st.text_input("Vision-Modell", VISION_MODEL)
     else:
