@@ -318,7 +318,7 @@ def render_elster_help(s: dict, erklaeren: bool = True) -> str:
             for ub in n["uebergangsbeihilfe"]:
                 out.append(f"- `{ub['datei']}` ({ub['inhaber']}): "
                            f"{e(ub['betrag'])} – als zusätzlicher Arbeitslohn "
-                           "in die Schätzung eingerechnet (voll versteuert).")
+                           "in die Schätzung eingerechnet.")
                 if ub["lohnsteuer"] or ub["soli"] or ub["kirchensteuer"]:
                     out.append(
                         f"  - Bereits einbehalten: Lohnsteuer "
@@ -326,12 +326,14 @@ def render_elster_help(s: dict, erklaeren: bool = True) -> str:
                         f"Kirchensteuer {e(ub['kirchensteuer'])} "
                         "(in der Schätzung als bereits gezahlt berücksichtigt).")
             out += [
-                "- ⚠️ **Fünftelregelung (§ 34 EStG) prüfen!** Bei Vergütung für "
-                "mehrjährige Tätigkeit kann die ermäßigte Besteuerung viel "
-                "Geld sparen – dieses Tool berechnet sie NICHT automatisch. "
-                "In ELSTER die Zeile 'ermäßigt zu besteuernde Entschädigung' "
-                "ausfüllen bzw. einen Steuerberater/Lohnsteuerhilfeverein "
-                "hinzuziehen.",
+                "- ℹ️ **Fünftelregelung (§ 34 EStG):** Die Schätzung vergleicht "
+                "automatisch volle Besteuerung mit der Fünftelregelung "
+                "(Rechenweg unten) und nutzt die günstigere Variante. "
+                "Voraussetzung ist eine 'Vergütung für mehrjährige "
+                "Tätigkeit' (§ 34 Abs. 2 Nr. 4 EStG) – bei Unsicherheit "
+                "Steuerberater/Lohnsteuerhilfeverein hinzuziehen. In ELSTER "
+                "ggf. die Zeile 'ermäßigt zu besteuernde Entschädigung' "
+                "ausfüllen.",
                 "",
             ]
 

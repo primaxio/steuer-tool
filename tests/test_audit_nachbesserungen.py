@@ -142,6 +142,74 @@ def test_uebergangsbeihilfe_lohnsteuer_wird_angerechnet():
           "in 'bereits gezahlt' ein und erscheinen im Export")
 
 
+def test_fuenftelregelung_wird_in_veranlagung_automatisch_gewaehlt():
+    docs = [{
+        "dateiname": "lsb.pdf", "kategorie": "lohnsteuerbescheinigung_zivil",
+        "inhaber": "P1",
+        "extrahierte_daten": {"bruttoarbeitslohn": 20000, "lohnsteuer": 2000},
+    }, {
+        "dateiname": "beihilfe.pdf", "kategorie": "uebergangsbeihilfe",
+        "inhaber": "P1", "betrag_eur": 15000.0,
+    }]
+    interview = {"zusammenveranlagung": False}
+    v = berechne_veranlagung(docs, CFG24, interview)
+    tarif_step = _step(v, "Tarifliche Einkommensteuer")
+    assert "Fünftelregelung" in tarif_step["text"], tarif_step
+    assert any("Fünftelregelung auf die Übergangsbeihilfe angewendet" in w
+              for w in v["warnhinweise"])
+
+    # Ohne Beihilfe darf natürlich keine Fünftelregelung-Zeile auftauchen.
+    v_ohne = berechne_veranlagung(docs[:1], CFG24, interview)
+    tarif_step_ohne = _step(v_ohne, "Tarifliche Einkommensteuer")
+    assert "Fünftelregelung" not in tarif_step_ohne["text"]
+    print("✅ berechne_veranlagung wendet die Fünftelregelung automatisch "
+          "an, wenn eine Übergangsbeihilfe vorliegt und es günstiger ist")
+
+
+def test_vorsorge_hoechstbetrag_kv_pv_ueber_deckel_keine_zusatzwirkung():
+    docs = [{
+        "dateiname": "lsb.pdf", "kategorie": "lohnsteuerbescheinigung_zivil",
+        "inhaber": "P1",
+        "extrahierte_daten": {"bruttoarbeitslohn": 40000, "lohnsteuer": 6000,
+                              "kv_beitraege": 3000.0, "pv_beitraege": 400.0},
+    }, {
+        "dateiname": "haftpflicht.pdf", "kategorie": "vorsorge_versicherung",
+        "inhaber": "P1", "betrag_eur": 200.0,
+    }]
+    interview = {"zusammenveranlagung": False}
+    v = berechne_veranlagung(docs, CFG24, interview)
+    # KV+PV = 3400 € > Höchstbetrag 1.900 € -> sonstige Vorsorge (Haftpflicht)
+    # wirkt sich NICHT zusätzlich aus (Normalfall bei gesetzl. KV).
+    assert not any("zusätzlich wirksame sonstige" in s["text"]
+                  for s in v["schritte"])
+    assert any("bereits ausgeschöpft" in w for w in v["warnhinweise"])
+    print("✅ Vorsorge-Höchstbetrag: KV/PV über Deckel -> Zusatzversicherung "
+          "wirkt sich korrekt NICHT aus")
+
+
+def test_vorsorge_hoechstbetrag_niedrige_kv_pv_zusatzwirkung():
+    docs = [{
+        "dateiname": "lsb.pdf", "kategorie": "lohnsteuerbescheinigung_zivil",
+        "inhaber": "P1",
+        "extrahierte_daten": {"bruttoarbeitslohn": 20000, "lohnsteuer": 2000,
+                              "kv_beitraege": 800.0, "pv_beitraege": 100.0},
+    }, {
+        "dateiname": "haftpflicht.pdf", "kategorie": "vorsorge_versicherung",
+        "inhaber": "P1", "betrag_eur": 500.0,
+    }]
+    interview = {"zusammenveranlagung": False}
+    v = berechne_veranlagung(docs, CFG24, interview)
+    # KV+PV = 900 € < Höchstbetrag 1.900 € -> bis zu 1.000 € Restraum,
+    # die volle Zusatzversicherung (500 €) sollte sich damit auswirken.
+    sonstige_step = next(
+        (s for s in v["schritte"] if "zusätzlich wirksame sonstige" in s["text"]),
+        None)
+    assert sonstige_step is not None, v["schritte"]
+    assert sonstige_step["wert"] == -500.0, sonstige_step
+    print("✅ Vorsorge-Höchstbetrag: niedrige KV/PV -> Zusatzversicherung "
+          "wirkt sich bis zum Höchstbetrag korrekt aus")
+
+
 def test_etoro_verlust_mit_tausendertrennzeichen_parst_korrekt():
     # VOR dem Fix: "-1.234,56" (de: Tausenderpunkt) hätte die alte
     # .replace(",", ".")-Logik zu "-1.234.56" verstümmelt -> ValueError,
@@ -177,7 +245,10 @@ if __name__ == "__main__":
     test_verlustvortrag_23_verrechnet_nicht_mit_rewards()
     test_verlustvortrag_kap_mindert_erstattung()
     test_uebergangsbeihilfe_lohnsteuer_wird_angerechnet()
+    test_fuenftelregelung_wird_in_veranlagung_automatisch_gewaehlt()
     test_clean_num_unveraendert_fuer_bestehende_aufrufer()
     test_clean_num_signed_erhaelt_vorzeichen()
+    test_vorsorge_hoechstbetrag_kv_pv_ueber_deckel_keine_zusatzwirkung()
+    test_vorsorge_hoechstbetrag_niedrige_kv_pv_zusatzwirkung()
     test_etoro_verlust_mit_tausendertrennzeichen_parst_korrekt()
     print("🎉 Bisherige Audit-Nachbesserungs-Tests bestanden.")

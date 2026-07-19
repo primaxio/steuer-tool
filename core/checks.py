@@ -67,12 +67,13 @@ def run_checks(docs: list, cfg: dict, interview: dict) -> list:
             "und müssen als zweites Arbeitsverhältnis in Anlage N erfasst werden.")
     if _docs_by_cat(docs, "uebergangsbeihilfe"):
         add("hinweis",
-            "Übergangsbeihilfe erkannt: Der Betrag wurde in der Schätzung "
-            "voll versteuert eingerechnet. Prüfe die Fünftelregelung "
-            "(§ 34 EStG, ermäßigte Besteuerung für Vergütung mehrjähriger "
-            "Tätigkeit) – das Tool berechnet sie NICHT automatisch, sie kann "
-            "aber deutlich Steuer sparen. Bei Unsicherheit Steuerberater/"
-            "Lohnsteuerhilfeverein fragen.")
+            "Übergangsbeihilfe erkannt: Die Schätzung vergleicht automatisch "
+            "volle Besteuerung mit der Fünftelregelung (§ 34 EStG, "
+            "ermäßigte Besteuerung für Vergütung mehrjähriger Tätigkeit) "
+            "und nutzt die günstigere Variante (Rechenweg im ELSTER-Tab "
+            "zeigt Details). Voraussetzung ist, dass es sich wirklich um "
+            "eine Vergütung für mehrjährige Tätigkeit handelt – bei "
+            "Unsicherheit Steuerberater/Lohnsteuerhilfeverein fragen.")
     from collections import Counter
     zivil_je_person = Counter(d.get("inhaber", "P1") for d in lsb_zivil)
     bw_je_person = Counter(d.get("inhaber", "P1") for d in lsb_bw)

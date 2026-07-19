@@ -32,6 +32,8 @@ TAX_YEARS = {
         "kleinunternehmer_grenze_vorjahr": 22000,   # § 19 UStG, bis 2024
         "kleinunternehmer_grenze_laufend": 50000,
         "gewerbesteuer_freibetrag": 24500,          # § 11 Abs. 1 GewStG
+        "vorsorge_hoechstbetrag_arbeitnehmer": 1900,  # § 10 Abs. 4 EStG
+        "vorsorge_hoechstbetrag_selbststaendig": 2800,  # ohne AG-Zuschuss
         # § 32a EStG Tarifformel 2024 (für Schätzungen; jährlich prüfen!)
         "tarif": {"gfb": 11784, "z2_ende": 17005, "z3_ende": 66760,
                   "z4_ende": 277825, "z2": (954.80, 1400),
@@ -62,6 +64,8 @@ TAX_YEARS = {
         "kleinunternehmer_grenze_vorjahr": 25000,   # § 19 UStG, ab 2025 (JStG 2024)
         "kleinunternehmer_grenze_laufend": 100000,
         "gewerbesteuer_freibetrag": 24500,          # § 11 Abs. 1 GewStG
+        "vorsorge_hoechstbetrag_arbeitnehmer": 1900,  # § 10 Abs. 4 EStG
+        "vorsorge_hoechstbetrag_selbststaendig": 2800,  # ohne AG-Zuschuss
         # § 32a EStG Tarifformel 2025 (für Schätzungen; jährlich prüfen!)
         "tarif": {"gfb": 12096, "z2_ende": 17443, "z3_ende": 68480,
                   "z4_ende": 277825, "z2": (932.30, 1400),
