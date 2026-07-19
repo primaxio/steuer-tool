@@ -78,6 +78,24 @@ Finanzamt (ERiC-Zertifizierung nötig) – bewusste Design-Entscheidung.
 - `core/sparcheck.py` – ITEMS-Checkliste (~23 Posten, Buckets wk/sa/
   parteispenden/h35a_*/agb), render_sparcheck() = Tab 4, summen() liefert
   Topf-Summen; fließt in Rechner + ELSTER-Hilfe ("Zusätzliche Posten").
+  UX (Ausbaustufe 8): render_sparcheck() bekommt zusätzlich `docs`, um
+  Doppelerfassung DIREKT am Eingabefeld sichtbar zu machen (nicht erst
+  als Fehler in Tab 4) – `_nk_automatik_werte()` summiert
+  summe_haushaltsnah/summe_handwerker aus hochgeladenen
+  "nebenkostenabrechnung"-Belegen; ist der jeweilige Spar-Check-Posten
+  (`nk_abrechnung`, `schornsteinfeger` – beide überschneiden sich laut
+  vision.py-Extraktion mit der NK-Abrechnung) noch nicht angehakt, zeigt
+  ein `st.info` den bereits automatisch übernommenen Betrag ("hier
+  normalerweise nichts eintragen"); ist er angehakt, wird daraus ein
+  `st.warning` ("Doppelerfassung-Risiko"). Zusätzlich: laufende
+  Zwischensumme je Gruppen-Überschrift (sichtbar auch bei eingeklapptem
+  Expander) und eine `st.metric()`-Kachelreihe statt Fließtext am Ende.
+  WICHTIG: Beim Bauen von Hinweistexten aus mehreren String-Literalen
+  NIE `.replace(",", "X").replace(".", ",").replace("X", ".")` an die
+  verkettete Literalkette hängen – das zerstört Satzzeichen im
+  Fließtext (Python verkettet adjazente String-Literale VOR jedem
+  `.replace()`-Aufruf). Zahl zuerst separat formatieren, dann per
+  f-string in den Satz einsetzen (siehe `test_automatik.py`).
 - `core/veranlagung.py` – berechne_veranlagung(): Brutto → WK (max mit
   Pauschbetrag) → +Krypto → −Vorsorge (LSB Z. 23–26, Fallback 19 % mit
   Warnung) → −SA (inkl. gezahlter KiSt!) → −agB über zumutbarer Grenze →

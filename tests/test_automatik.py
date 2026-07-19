@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core.checks import run_checks
 from core.elster_export import build_summary, render_elster_help
+from core.sparcheck import _nk_automatik_werte
 from core.tax_config import get_config
 from core.veranlagung import berechne_veranlagung
 
@@ -94,8 +95,41 @@ def test_veranlagung_ermaessigung():
           "Broker-Warnhinweis vorhanden")
 
 
+def test_sparcheck_nk_automatik_werte():
+    """Spar-Check-Tab (Doppelerfassungs-Hinweis direkt am Eingabefeld,
+    siehe app.py) liest dieselben Summen wie checks.py/veranlagung.py."""
+    werte = _nk_automatik_werte(DOCS)
+    assert werte["summe_haushaltsnah"] == 593.64
+    assert werte["summe_handwerker"] == 26.26
+    assert _nk_automatik_werte([])["summe_haushaltsnah"] == 0.0
+    assert _nk_automatik_werte(None)["summe_handwerker"] == 0.0
+    print("✅ sparcheck._nk_automatik_werte() summiert korrekt "
+         "(inkl. leere/None-Docs-Liste)")
+
+
+def test_sparcheck_warnhinweis_zerstoert_satzzeichen_nicht():
+    """Regressionstest für einen Bug, der beim ersten Schreiben dieses
+    Features auftrat: .replace(',', 'X').replace('.', ',').replace('X', '.')
+    auf den GESAMTEN (verketteten) Hinweistext statt nur auf die
+    formatierte Zahl angewendet zerstört jedes Komma/jeden Punkt im Satz
+    (z. B. 'ZUSÄTZLICHE, davon' -> 'ZUSÄTZLICHE. davon')."""
+    nk_wert = 1234.5
+    nk_wert_str = (f"{nk_wert:,.2f} €".replace(",", "X")
+                  .replace(".", ",").replace("X", "."))
+    assert nk_wert_str == "1.234,50 €", nk_wert_str
+    satz = ("Häkchen hier nur setzen, wenn du ZUSÄTZLICHE, davon "
+           f"unabhängige Kosten von {nk_wert_str} eintragen willst.")
+    assert "ZUSÄTZLICHE, davon" in satz, \
+        "Satzkomma darf durch die Zahlenformatierung nicht verändert werden"
+    assert satz.count(nk_wert_str) == 1
+    print("✅ Zahlenformatierung im Doppelerfassungs-Hinweis lässt "
+         "Satzzeichen im Fließtext unangetastet")
+
+
 if __name__ == "__main__":
     test_checks_hinweise()
     test_summary_und_elster_hilfe()
     test_veranlagung_ermaessigung()
+    test_sparcheck_nk_automatik_werte()
+    test_sparcheck_warnhinweis_zerstoert_satzzeichen_nicht()
     print("🎉 Alle Automatik-Tests bestanden.")

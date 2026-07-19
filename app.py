@@ -166,7 +166,8 @@ if einfacher_modus:
      "🧮 6 · Ergebnis & ELSTER", "📖 7 · Verstehen & Fragen"])
 
 with tab_spar:
-    render_sparcheck(st.session_state.interview, personen)
+    render_sparcheck(st.session_state.interview, personen,
+                     st.session_state.docs)
 
 with tab_crypto:
     render_crypto_tab(cfg, api_key, model, st.session_state.interview,

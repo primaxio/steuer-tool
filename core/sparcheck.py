@@ -123,8 +123,28 @@ GRUPPEN = [
     ("agb", "🏥 Außergewöhnliche Belastungen (Krankheitskosten)"),
 ]
 
+# Spar-Check-Posten, die inhaltlich mit den automatisch aus einer
+# hochgeladenen "nebenkostenabrechnung" extrahierten § 35a-Summen
+# überlappen (vision.py rechnet Schornsteinfeger/Heizungswartung bereits
+# in "posten_handwerker" ein) – hier droht bei zusätzlichem manuellem
+# Eintrag eine Doppelerfassung (siehe checks.py-Wächter, der dieselbe
+# Kombination als "fehler" meldet, hier aber direkt am Eingabefeld).
+_NK_AUTOMATIK_UEBERLAPPT = {"nk_abrechnung": "summe_haushaltsnah",
+                           "schornsteinfeger": "summe_handwerker"}
 
-def render_sparcheck(interview: dict, personen: dict):
+
+def _nk_automatik_werte(docs: list) -> dict:
+    out = {"summe_haushaltsnah": 0.0, "summe_handwerker": 0.0}
+    for d in docs or []:
+        if d.get("kategorie") != "nebenkostenabrechnung":
+            continue
+        ed = d.get("extrahierte_daten", {})
+        out["summe_haushaltsnah"] += float(ed.get("summe_haushaltsnah") or 0)
+        out["summe_handwerker"] += float(ed.get("summe_handwerker") or 0)
+    return out
+
+
+def render_sparcheck(interview: dict, personen: dict, docs: list = None):
     st.subheader("💰 Spar-Check – das Maximum rausholen")
     st.caption("Hake an, was auf euch zutrifft, und trag (geschätzte) Beträge "
                "ein. Alles fließt sofort in den Erstattungsrechner ein. "
@@ -132,10 +152,19 @@ def render_sparcheck(interview: dict, personen: dict):
     spar = interview.setdefault("spar", {})
     zusammen = interview.get("zusammenveranlagung", True)
     aktive = ("P1", "P2") if zusammen else ("P1",)
+    nk_auto = _nk_automatik_werte(docs)
+    # Stand VOR den Widgets dieses Durchlaufs (aus dem letzten Rerun) – für
+    # die Zwischensummen an den Gruppen-Überschriften, damit man auch ohne
+    # Aufklappen sieht, was schon erfasst ist.
+    stand = summen(interview)
+    stand["wk"] = stand["wk_P1"] + stand["wk_P2"]
 
     for bucket, ueberschrift in GRUPPEN:
         items = [i for i in ITEMS if i["bucket"] == bucket]
-        with st.expander(ueberschrift,
+        bucket_summe = stand.get(bucket, 0.0)
+        label = ueberschrift + (f"  —  ✅ {bucket_summe:,.0f} € erfasst"
+                                .replace(",", ".") if bucket_summe else "")
+        with st.expander(label,
                          expanded=any(spar.get(i["id"], {}).get("aktiv")
                                       for i in items)):
             for item in items:
@@ -145,6 +174,28 @@ def render_sparcheck(interview: dict, personen: dict):
                                     key=f"sp_{item['id']}")
                 eintrag["aktiv"] = aktiv
                 st.caption("💡 " + item["tipp"])
+
+                nk_feld = _NK_AUTOMATIK_UEBERLAPPT.get(item["id"])
+                nk_wert = nk_auto.get(nk_feld, 0.0) if nk_feld else 0.0
+                if nk_wert:
+                    nk_wert_str = (f"{nk_wert:,.2f} €".replace(",", "X")
+                                  .replace(".", ",").replace("X", "."))
+                    if aktiv:
+                        st.warning(
+                            "⚠️ **Doppelerfassung-Risiko**: Aus deiner "
+                            "hochgeladenen Nebenkostenabrechnung wurden "
+                            f"dafür bereits **{nk_wert_str}** automatisch "
+                            "übernommen (Tab 1 · Dokumente). Häkchen hier "
+                            "nur setzen, wenn du ZUSÄTZLICHE, davon "
+                            "unabhängige Kosten eintragen willst – sonst "
+                            "bitte entfernen.")
+                    else:
+                        st.info(
+                            f"✅ **{nk_wert_str}** wurden bereits "
+                            "automatisch aus deiner Nebenkostenabrechnung "
+                            "übernommen – hier normalerweise nichts "
+                            "zusätzlich eintragen.")
+
                 if aktiv:
                     if item["pro_person"]:
                         cols = st.columns(len(aktive))
@@ -163,12 +214,18 @@ def render_sparcheck(interview: dict, personen: dict):
                 st.markdown("")
 
     s = summen(interview)
-    st.success(
-        f"Erfasst: Werbungskosten {personen['P1']} {s['wk_P1']:,.0f} € · "
-        f"{personen['P2']} {s['wk_P2']:,.0f} € · Sonderausgaben "
-        f"{s['sa']:,.0f} € · § 35a-Arbeitskosten "
-        f"{s['h35a_handwerker'] + s['h35a_haushalt']:,.0f} € · "
-        f"a. g. Belastungen {s['agb']:,.0f} €".replace(",", "."))
+    st.divider()
+    st.markdown("**📊 Übersicht: bisher erfasst**")
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric(f"👜 WK {personen['P1']}", f"{s['wk_P1']:,.0f} €".replace(",", "."))
+    m2.metric(f"👜 WK {personen['P2']}" if zusammen else "🎁 Sonderausgaben",
+             f"{(s['wk_P2'] if zusammen else s['sa']):,.0f} €".replace(",", "."))
+    m3.metric("🔧🏠 § 35a-Arbeitskosten",
+             f"{s['h35a_handwerker'] + s['h35a_haushalt']:,.0f} €"
+             .replace(",", "."),
+             help="20 % davon werden direkt von der Steuer abgezogen.")
+    m4.metric("🏥 Außergew. Belastungen",
+             f"{s['agb']:,.0f} €".replace(",", "."))
 
 
 def summen(interview: dict) -> dict:
