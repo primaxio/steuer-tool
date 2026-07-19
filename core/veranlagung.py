@@ -298,6 +298,35 @@ def berechne_veranlagung(docs: list, cfg: dict, interview: dict) -> dict:
         step("+ Rückholbare Abgeltungsteuer (ungenutzter "
              "Sparer-Pauschbetrag)", kap_erstattung)
 
+    # ---------- 10b) Günstigerprüfung KAP (§ 32d Abs. 6 EStG)
+    # Vergleich: pauschale Abgeltungsteuer (25 % + Soli) vs. Grundtarif/
+    # Splitting auf das steuerpflichtige zvE + KAP-Erträge (Grenzbetrachtung,
+    # analog steuer_auf_krypto()). Lohnt sich nur bei niedrigem persönlichen
+    # Steuersatz (typischerweise < 25 %) – das Finanzamt prüft das mit
+    # angekreuzter Zeile 4 der Anlage KAP ohnehin automatisch und wendet
+    # die günstigere Variante an.
+    kap_stpfl_bemessung = max(0.0, ertraege - pb_kap)
+    if interview.get("guenstigerpruefung", True) and kap_stpfl_bemessung > 0:
+        def _tarif(z):
+            return (2 * est_nach_tarif(z / 2, cfg)) if zusammen \
+                else est_nach_tarif(z, cfg)
+        est_ohne_kap = _tarif(zve)
+        est_mit_kap = _tarif(zve + kap_stpfl_bemessung)
+        mehrsteuer_grundtarif = round(est_mit_kap - est_ohne_kap, 2)
+        abgeltung_betrag = round(kap_stpfl_bemessung * 0.25 * 1.055, 2)
+        if mehrsteuer_grundtarif < abgeltung_betrag:
+            guenstiger_vorteil = round(abgeltung_betrag - mehrsteuer_grundtarif, 2)
+            step("+ Günstigerprüfung KAP (persönlicher Steuersatz < 25 %)",
+                 guenstiger_vorteil)
+            kap_erstattung += guenstiger_vorteil
+            b["warnhinweise"].append(
+                f"Günstigerprüfung lohnt sich: Dein persönlicher Grenz-"
+                f"steuersatz auf die KAP-Erträge läge bei etwa "
+                f"{round(mehrsteuer_grundtarif / kap_stpfl_bemessung * 100, 1)} % "
+                "statt der pauschalen ~26,4 % Abgeltungsteuer – in Anlage "
+                "KAP Zeile 4 ankreuzen! Grobe Schätzung ohne Kirchensteuer-"
+                "Effekt auf die Abgeltungsteuer.")
+
     # ---------- 11) Abgeltungsteuer auf Auslands-KAP (Termingeschäfte, Zinsen)
     berichte = [d for d in docs if d.get("kategorie") == "broker_steuerbericht"]
     tg = sum(_num(interview.get(f"termin_gewinne_{p}")) for p in aktive) + \

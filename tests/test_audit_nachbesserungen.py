@@ -239,6 +239,46 @@ def test_etoro_verlust_mit_tausendertrennzeichen_parst_korrekt():
           f"(Gewinn={d.gewinn} €, negativ wie erwartet)")
 
 
+def _kap_docs(brutto, kap_ertraege):
+    return [{
+        "dateiname": "lsb.pdf", "kategorie": "lohnsteuerbescheinigung_zivil",
+        "inhaber": "P1",
+        "extrahierte_daten": {"bruttoarbeitslohn": brutto, "lohnsteuer": 0},
+    }, {
+        "dateiname": "bank.pdf", "kategorie": "steuerbescheinigung_bank",
+        "inhaber": "P1",
+        "extrahierte_daten": {
+            "kapitalertraege_zeile7": kap_ertraege,
+            "in_anspruch_genommener_freistellungsauftrag": 0.0},
+    }]
+
+
+def test_guenstigerpruefung_kap_niedriges_einkommen():
+    docs = _kap_docs(15000, 5000.0)
+    v = berechne_veranlagung(docs, CFG24, {"zusammenveranlagung": False})
+    guenstiger_step = _step(v, "Günstigerprüfung KAP")
+    assert guenstiger_step["wert"] > 0, guenstiger_step
+    assert any("Günstigerprüfung lohnt sich" in w for w in v["warnhinweise"])
+    print(f"✅ Günstigerprüfung KAP greift bei niedrigem Einkommen "
+          f"(+{guenstiger_step['wert']} €)")
+
+
+def test_guenstigerpruefung_kap_hohes_einkommen_kein_vorteil():
+    docs = _kap_docs(90000, 5000.0)
+    v = berechne_veranlagung(docs, CFG24, {"zusammenveranlagung": False})
+    assert not any("Günstigerprüfung KAP" in s["text"] for s in v["schritte"]), \
+        "Bei > 25 % Grenzsteuersatz darf keine Günstigerprüfung-Zeile erscheinen"
+    print("✅ Günstigerprüfung KAP bleibt bei hohem Einkommen korrekt aus")
+
+
+def test_guenstigerpruefung_kap_abschaltbar():
+    docs = _kap_docs(15000, 5000.0)
+    v = berechne_veranlagung(docs, CFG24, {
+        "zusammenveranlagung": False, "guenstigerpruefung": False})
+    assert not any("Günstigerprüfung KAP" in s["text"] for s in v["schritte"])
+    print("✅ Günstigerprüfung KAP respektiert den Fragebogen-Haken (aus)")
+
+
 if __name__ == "__main__":
     test_verlustvortrag_23_wird_verrechnet()
     test_verlustvortrag_23_deckelt_bei_null_kein_negativer_gewinn()
@@ -246,6 +286,9 @@ if __name__ == "__main__":
     test_verlustvortrag_kap_mindert_erstattung()
     test_uebergangsbeihilfe_lohnsteuer_wird_angerechnet()
     test_fuenftelregelung_wird_in_veranlagung_automatisch_gewaehlt()
+    test_guenstigerpruefung_kap_niedriges_einkommen()
+    test_guenstigerpruefung_kap_hohes_einkommen_kein_vorteil()
+    test_guenstigerpruefung_kap_abschaltbar()
     test_clean_num_unveraendert_fuer_bestehende_aufrufer()
     test_clean_num_signed_erhaelt_vorzeichen()
     test_vorsorge_hoechstbetrag_kv_pv_ueber_deckel_keine_zusatzwirkung()

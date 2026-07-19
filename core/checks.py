@@ -148,10 +148,12 @@ def run_checks(docs: list, cfg: dict, interview: dict) -> list:
             add("hinweis",
                 f"Ausländische Quellensteuer ({quellensteuer:.2f} €) erkannt – "
                 "in Anlage KAP anrechnen lassen.")
-        add("frage",
-            "Günstigerprüfung: Liegt dein persönlicher Grenzsteuersatz unter "
-            "25 %? Dann in Anlage KAP Zeile 4 die Günstigerprüfung beantragen "
-            "(prüft das Finanzamt kostenlos, kann nur Vorteile bringen).")
+        add("hinweis",
+            "Günstigerprüfung: Die Schätzung vergleicht automatisch den "
+            "Abgeltungsteuersatz (~26,4 %) mit deinem persönlichen "
+            "Steuersatz und zeigt im Rechenweg (ELSTER-Tab), ob sich Zeile "
+            "4 der Anlage KAP lohnt. Das Finanzamt prüft das beim Ankreuzen "
+            "ohnehin kostenlos – kann nur Vorteile bringen.")
 
     # ---------- Krypto (Anlage SO) ----------
     crypto_engine = interview.get("_crypto")
