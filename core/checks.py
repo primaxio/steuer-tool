@@ -65,6 +65,15 @@ def run_checks(docs: list, cfg: dict, interview: dict) -> list:
             "Es fehlt die Bescheinigung über die Übergangsgebührnisse der "
             "Bundeswehr (BVA). Diese sind voll steuerpflichtiger Arbeitslohn "
             "und müssen als zweites Arbeitsverhältnis in Anlage N erfasst werden.")
+    if _docs_by_cat(docs, "uebergangsbeihilfe"):
+        add("hinweis",
+            "Übergangsbeihilfe erkannt: Die Schätzung vergleicht automatisch "
+            "volle Besteuerung mit der Fünftelregelung (§ 34 EStG, "
+            "ermäßigte Besteuerung für Vergütung mehrjähriger Tätigkeit) "
+            "und nutzt die günstigere Variante (Rechenweg im ELSTER-Tab "
+            "zeigt Details). Voraussetzung ist, dass es sich wirklich um "
+            "eine Vergütung für mehrjährige Tätigkeit handelt – bei "
+            "Unsicherheit Steuerberater/Lohnsteuerhilfeverein fragen.")
     from collections import Counter
     zivil_je_person = Counter(d.get("inhaber", "P1") for d in lsb_zivil)
     bw_je_person = Counter(d.get("inhaber", "P1") for d in lsb_bw)
@@ -118,9 +127,9 @@ def run_checks(docs: list, cfg: dict, interview: dict) -> list:
     zusammen = bool(interview.get("zusammenveranlagung"))
     kap_docs = _docs_by_cat(docs, "steuerbescheinigung_bank")
     if kap_docs:
-        fsa = sum(_num(d["extrahierte_daten"].get(
+        fsa = sum(_num(d.get("extrahierte_daten", {}).get(
             "in_anspruch_genommener_freistellungsauftrag")) for d in kap_docs)
-        ertraege = sum(_num(d["extrahierte_daten"].get(
+        ertraege = sum(_num(d.get("extrahierte_daten", {}).get(
             "kapitalertraege_zeile7", d.get("betrag_eur"))) for d in kap_docs)
         pb = cfg["sparer_pauschbetrag"] * (2 if zusammen else 1)
         if zusammen:
@@ -133,16 +142,18 @@ def run_checks(docs: list, cfg: dict, interview: dict) -> list:
                 f"Sparer-Pauschbetrag ({pb:.0f} €) wurde laut Bescheinigungen "
                 f"nur mit {fsa:.2f} € ausgeschöpft. Über die Anlage KAP holst "
                 "du dir zu viel gezahlte Kapitalertragsteuer zurück.")
-        quellensteuer = sum(_num(d["extrahierte_daten"].get(
+        quellensteuer = sum(_num(d.get("extrahierte_daten", {}).get(
             "auslaendische_quellensteuer")) for d in kap_docs)
         if quellensteuer > 0:
             add("hinweis",
                 f"Ausländische Quellensteuer ({quellensteuer:.2f} €) erkannt – "
                 "in Anlage KAP anrechnen lassen.")
-        add("frage",
-            "Günstigerprüfung: Liegt dein persönlicher Grenzsteuersatz unter "
-            "25 %? Dann in Anlage KAP Zeile 4 die Günstigerprüfung beantragen "
-            "(prüft das Finanzamt kostenlos, kann nur Vorteile bringen).")
+        add("hinweis",
+            "Günstigerprüfung: Die Schätzung vergleicht automatisch den "
+            "Abgeltungsteuersatz (~26,4 %) mit deinem persönlichen "
+            "Steuersatz und zeigt im Rechenweg (ELSTER-Tab), ob sich Zeile "
+            "4 der Anlage KAP lohnt. Das Finanzamt prüft das beim Ankreuzen "
+            "ohnehin kostenlos – kann nur Vorteile bringen.")
 
     # ---------- Krypto (Anlage SO) ----------
     crypto_engine = interview.get("_crypto")
@@ -158,7 +169,7 @@ def run_checks(docs: list, cfg: dict, interview: dict) -> list:
             add("warnung", f"Krypto-Import: {w}")
     krypto = _docs_by_cat(docs, "krypto_report")
     if krypto and not crypto_engine:
-        gewinn = sum(_num(d["extrahierte_daten"].get(
+        gewinn = sum(_num(d.get("extrahierte_daten", {}).get(
             "gewinn_steuerpflichtig", d.get("betrag_eur"))) for d in krypto)
         freigrenze = cfg["freigrenze_private_veraeusserung"]
         if 0 < gewinn < freigrenze:
@@ -185,8 +196,8 @@ def run_checks(docs: list, cfg: dict, interview: dict) -> list:
 
     # ---------- Automatik-Bestätigungen & Kontrollwerte ----------
     for d in _docs_by_cat(docs, "nebenkostenabrechnung"):
-        sh = _num(d["extrahierte_daten"].get("summe_haushaltsnah"))
-        sw = _num(d["extrahierte_daten"].get("summe_handwerker"))
+        sh = _num(d.get("extrahierte_daten", {}).get("summe_haushaltsnah"))
+        sw = _num(d.get("extrahierte_daten", {}).get("summe_handwerker"))
         if sh or sw:
             add("hinweis",
                 f"'{d['dateiname']}': § 35a-Posten automatisch übernommen – "
@@ -199,7 +210,7 @@ def run_checks(docs: list, cfg: dict, interview: dict) -> list:
                 "unscharf? Ggf. neu fotografieren oder manuell im "
                 "Spar-Check eintragen.")
     for d in _docs_by_cat(docs, "broker_steuerbericht"):
-        so_wert = _num(d["extrahierte_daten"].get("so_krypto_gewinn"))
+        so_wert = _num(d.get("extrahierte_daten", {}).get("so_krypto_gewinn"))
         if so_wert and interview.get("_crypto"):
             add("hinweis",
                 f"Kontrollwert {d.get('aussteller') or d['dateiname']}: "
@@ -225,6 +236,39 @@ def run_checks(docs: list, cfg: dict, interview: dict) -> list:
             "gescannt UND manuelle Termingeschäfte-/Zins-Werte sind "
             "eingetragen. Falls beides derselbe Broker ist: manuelle Felder "
             "auf 0 setzen – der Scan übernimmt automatisch.")
+
+    # ---------- Betrieb / Nebengewerbe (EÜR) ----------
+    namen_vorab = interview.get("personen", {"P1": "Person 1", "P2": "Person 2"})
+    betriebe_daten = interview.get("_betriebe") or {"betriebe": []}
+    betriebe_je_person = {
+        r["inhaber"] for r in betriebe_daten["betriebe"]}
+    for p_key in ("P1", "P2"):
+        if interview.get(f"hat_betrieb_{p_key}") and p_key not in betriebe_je_person:
+            add("frage",
+                f"{namen_vorab.get(p_key, p_key)}: Betrieb/Nebengewerbe "
+                "angegeben, aber noch kein Betrieb im Tab 🏭 Betrieb "
+                "angelegt – bitte dort nachtragen, sonst fehlt der Gewinn "
+                "in der Erklärung.")
+    for r in betriebe_daten["betriebe"]:
+        if not (r["einnahmen"] or r["ausgaben"] or r["afa"]):
+            add("frage",
+                f"Betrieb '{r['betrieb']}': Noch keine Einnahmen/Ausgaben "
+                "für dieses Steuerjahr erfasst – Belege hochladen (Kategorie "
+                "Betriebseinnahme/-ausgabe) oder im Tab 🏭 Betrieb manuell "
+                "eintragen.")
+        for h in r.get("hinweise", []):
+            if "⚠️" in h:
+                add("warnung", f"Betrieb '{r['betrieb']}': {h}")
+    anlagegut_belege = [
+        d for d in docs if d.get("kategorie") == "betrieb_ausgabe"
+        and d.get("extrahierte_daten", {}).get("ist_anlagegut")]
+    if anlagegut_belege:
+        add("frage",
+            f"{len(anlagegut_belege)} Beleg(e) sehen nach einem Anlagegut "
+            "aus (Anschaffung mit mehrjähriger Nutzung) – wurden sie im "
+            "Tab 🏭 Betrieb als AfA (Abschreibung über mehrere Jahre) "
+            "erfasst, statt als Sofortausgabe? Sonst wird der Gewinn "
+            "verzerrt.")
 
     # ---------- § 35a ----------
     for d in _docs_by_cat(docs, "handwerker_haushaltsnah"):
@@ -278,8 +322,8 @@ def run_checks(docs: list, cfg: dict, interview: dict) -> list:
     banken = {(d.get("aussteller") or "").lower()
               for d in _docs_by_cat(docs, "steuerbescheinigung_bank")}
     verluste_kap = any(
-        _num(d["extrahierte_daten"].get("verlust_aktien")) > 0 or
-        _num(d["extrahierte_daten"].get("verlust_sonstige")) > 0
+        _num(d.get("extrahierte_daten", {}).get("verlust_aktien")) > 0 or
+        _num(d.get("extrahierte_daten", {}).get("verlust_sonstige")) > 0
         for d in _docs_by_cat(docs, "steuerbescheinigung_bank"))
     if len(banken) > 1 and verluste_kap:
         add("warnung",
@@ -341,6 +385,28 @@ def run_checks(docs: list, cfg: dict, interview: dict) -> list:
     if not interview.get("kirchensteuerpflichtig_beantwortet"):
         add("frage", "Bist du kirchensteuerpflichtig? (Relevant für KAP und "
                      "Sonderausgabenabzug der Kirchensteuer.)")
+
+    # ---------- Rente (Anlage R) ----------
+    for d in _docs_by_cat(docs, "rentenbezugsmitteilung"):
+        if not d.get("extrahierte_daten", {}).get("rentenbeginn_jahr"):
+            add("warnung",
+                f"Rentenbezugsmitteilung `{d.get('dateiname', '?')}`: "
+                "Rentenbeginn-Jahr fehlt – ohne dieses Jahr kann der "
+                "Besteuerungsanteil nicht bestimmt werden und wurde "
+                "vorsichtshalber mit 100 % angesetzt. Bitte im Beleg "
+                "nachtragen.")
+
+    # ---------- Behinderung / Pflege / Unterhalt ----------
+    hat_krankheitskosten = bool(_docs_by_cat(docs, "krankheitskosten")) or \
+        bool((interview.get("spar") or {}).get("krankheit", {}).get("aktiv"))
+    if hat_krankheitskosten and not any(
+            interview.get(f"gdb_{p}") for p in ("P1", "P2")):
+        add("frage",
+            "Krankheitskosten erfasst: Liegt bei dir/deinem Partner eine "
+            "amtlich festgestellte Behinderung (GdB) vor? Ab GdB 20 gibt "
+            "es einen Pauschbetrag OHNE Einzelnachweis und OHNE Kürzung "
+            "um die zumutbare Belastung (Fragebogen-Tab, Bereich "
+            "'Behinderung, Pflege & Unterhalt').")
 
     return findings
 

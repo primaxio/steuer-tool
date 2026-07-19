@@ -28,6 +28,9 @@ def jahres_uebersicht(docs: list) -> Counter:
     return Counter(int(d.get("steuerjahr_zuordnung", 0) or 0) for d in docs)
 
 
+def ist_im_jahr(d: dict, jahr: int) -> bool:
+    return int(d.get("steuerjahr_zuordnung", jahr) or jahr) == jahr
+
+
 def docs_im_jahr(docs: list, jahr: int) -> list:
-    return [d for d in docs
-            if int(d.get("steuerjahr_zuordnung", jahr) or jahr) == jahr]
+    return [d for d in docs if ist_im_jahr(d, jahr)]

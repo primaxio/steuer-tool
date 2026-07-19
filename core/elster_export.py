@@ -7,7 +7,6 @@ Erzeugt pro Anlage eine Liste "Feld → Wert", die 1:1 in ELSTER
 import json
 from datetime import datetime
 
-from .categories import label_of
 from .checks import _num, entfernungspauschale
 
 
@@ -81,12 +80,22 @@ def build_summary(docs: list, cfg: dict, interview: dict) -> dict:
         "kap_aktien": _num(interview.get("verlustvortrag_kap_aktien")),
         "kap_sonstige": _num(interview.get("verlustvortrag_kap_sonstige")),
     }
+    uebergangsbeihilfe = [{
+        "datei": d["dateiname"], "inhaber": d.get("inhaber", "P1"),
+        "betrag": _num(d.get("betrag_eur")),
+        "lohnsteuer": ed(d, "lohnsteuer"), "soli": ed(d, "soli"),
+        "kirchensteuer": ed(d, "kirchensteuer")}
+        for d in cat(docs, "uebergangsbeihilfe")]
     s["anlagen"]["N"] = {
         "arbeitsverhaeltnisse": n_eintraege,
         "werbungskosten_pro_person": wk_pro_person,
+        "uebergangsbeihilfe": uebergangsbeihilfe,
     }
 
     # ---------- Anlage KAP ----------
+    # Bewusst NICHT nach inhaber gefiltert – wie Sonderausgaben/agB gehört
+    # KAP bei Zusammenveranlagung in einen GEMEINSAMEN Topf (anders als
+    # Anlage N/SO mit eigenen Pausch-/Freibeträgen pro Person).
     kap_docs = cat(docs, "steuerbescheinigung_bank")
     if kap_docs:
         s["anlagen"]["KAP"] = {
@@ -194,8 +203,62 @@ def build_summary(docs: list, cfg: dict, interview: dict) -> dict:
         s["anlagen"]["Außergewöhnliche Belastungen"] = {
             "summe_belege": round(sum(_num(d.get("betrag_eur")) for d in agb), 2),
             "hinweis": "Wirkt erst oberhalb der zumutbaren Belastung "
-                       "(1–7 % des Gesamtbetrags der Einkünfte).",
+                       "(§ 33 Abs. 3 EStG, dreistufig 1–7 % des Gesamtbetrags "
+                       "der Einkünfte je nach Familienstand/Kinderzahl – "
+                       "genauer Wert im Rechenweg des Tabs 'Ergebnis & "
+                       "ELSTER').",
         }
+
+    # ---------- Behinderten-/Pflege-Pauschbetrag, § 33a-Unterhalt ----------
+    from .veranlagung import _behinderten_pflege_unterhalt
+    pauschale_summe, pauschale_hinweise = _behinderten_pflege_unterhalt(
+        interview, cfg)
+    if pauschale_summe:
+        s["anlagen"]["Behinderung, Pflege & Unterhalt"] = {
+            "summe": pauschale_summe, "hinweise": pauschale_hinweise,
+        }
+
+    # ---------- Anlage R (Renten) ----------
+    renten_docs = cat(docs, "rentenbezugsmitteilung")
+    if renten_docs:
+        from .rente import rentenanteil_steuerpflichtig
+        eintraege = []
+        for d in renten_docs:
+            jahresbetrag = ed(d, "jahresbetrag_rente", d.get("betrag_eur"))
+            beginn = int(ed(d, "rentenbeginn_jahr", 0))
+            r = rentenanteil_steuerpflichtig(jahresbetrag, beginn, cfg)
+            eintraege.append({
+                "inhaber": d.get("inhaber", "P1"), "datei": d["dateiname"],
+                "rentenbeginn_jahr": beginn, **r})
+        s["anlagen"]["R"] = {"eintraege": eintraege}
+
+    # ---------- Anlage AV (Riester) ----------
+    riester_beitrag = {p: _num(interview.get(f"riester_beitrag_{p}"))
+                       for p in ("P1", "P2")}
+    if any(riester_beitrag.values()):
+        s["anlagen"]["AV"] = {
+            "beitraege": riester_beitrag,
+            "kinder_ab_2008": int(_num(interview.get("riester_kinder_ab_2008"))),
+            "kinder_vor_2008": int(_num(interview.get("riester_kinder_vor_2008"))),
+            "max_beitrag": cfg["riester_max_beitrag"],
+        }
+
+    # ---------- Gewerbe & Selbständigkeit (Anlage G / Anlage EÜR) ----------
+    betriebe_daten = interview.get("_betriebe")
+    if betriebe_daten and betriebe_daten.get("betriebe"):
+        s["anlagen"]["Gewerbe & Selbständigkeit (EÜR)"] = {
+            "betriebe": betriebe_daten["betriebe"],
+            "gewinn_pro_person": betriebe_daten["gewinn_pro_person"],
+        }
+
+    # ---------- Herkunft der Werte (Zuordnungs-Historie) ----------
+    # Nur Dokumente, deren Zuordnung über die reine Automatik hinausging
+    # (manuell korrigiert oder per Klärungs-Chat) – sonst wäre der Anhang
+    # bei jedem Beleg redundant mit "automatisch erkannt".
+    s["dokumente_historie"] = [
+        {"dateiname": d["dateiname"], "historie": d["zuordnungs_historie"]}
+        for d in docs
+        if len(d.get("zuordnungs_historie") or []) > 1]
 
     return s
 
@@ -286,6 +349,29 @@ def render_elster_help(s: dict, erklaeren: bool = True) -> str:
                  "- ℹ️ Unter dem Pauschbetrag – greift automatisch."),
                 "",
             ]
+        if n.get("uebergangsbeihilfe"):
+            out.append("### Übergangsbeihilfe (Einmalzahlung Bundeswehr)")
+            for ub in n["uebergangsbeihilfe"]:
+                out.append(f"- `{ub['datei']}` ({ub['inhaber']}): "
+                           f"{e(ub['betrag'])} – als zusätzlicher Arbeitslohn "
+                           "in die Schätzung eingerechnet.")
+                if ub["lohnsteuer"] or ub["soli"] or ub["kirchensteuer"]:
+                    out.append(
+                        f"  - Bereits einbehalten: Lohnsteuer "
+                        f"{e(ub['lohnsteuer'])}, Soli {e(ub['soli'])}, "
+                        f"Kirchensteuer {e(ub['kirchensteuer'])} "
+                        "(in der Schätzung als bereits gezahlt berücksichtigt).")
+            out += [
+                "- ℹ️ **Fünftelregelung (§ 34 EStG):** Die Schätzung vergleicht "
+                "automatisch volle Besteuerung mit der Fünftelregelung "
+                "(Rechenweg unten) und nutzt die günstigere Variante. "
+                "Voraussetzung ist eine 'Vergütung für mehrjährige "
+                "Tätigkeit' (§ 34 Abs. 2 Nr. 4 EStG) – bei Unsicherheit "
+                "Steuerberater/Lohnsteuerhilfeverein hinzuziehen. In ELSTER "
+                "ggf. die Zeile 'ermäßigt zu besteuernde Entschädigung' "
+                "ausfüllen.",
+                "",
+            ]
 
     kap = s["anlagen"].get("KAP")
     if kap:
@@ -374,8 +460,40 @@ def render_elster_help(s: dict, erklaeren: bool = True) -> str:
             "",
         ]
 
+    gew = s["anlagen"].get("Gewerbe & Selbständigkeit (EÜR)")
+    if gew:
+        out.append("## Gewerbe & Selbständigkeit – Anlage G / Anlage EÜR")
+        erk("Gewerbe & Selbständigkeit (EÜR)")
+        namen = {"P1": "Person 1", "P2": "Person 2"}
+        for r in gew["betriebe"]:
+            anlage = ("Anlage V" if r["art"] == "vermietung" else
+                     "Anlage S" if r["art"] == "freiberuflich" else "Anlage G")
+            out += [
+                f"### {r['betrieb']} ({anlage}) – "
+                f"{namen.get(r['inhaber'], r['inhaber'])}",
+                f"- Betriebseinnahmen: {e(r['einnahmen'])}",
+                f"- Betriebsausgaben: {e(r['ausgaben'])}",
+                f"- Abschreibungen (AfA): {e(r['afa'])}",
+                f"- **Gewinn/Überschuss {r['jahr']}: {e(r['gewinn'])}**",
+            ]
+            if r["afa_positionen"]:
+                out.append("- AfA-Positionen:")
+                for a in r["afa_positionen"]:
+                    out.append(
+                        f"  - {a['bezeichnung']}: {e(a['anschaffungskosten'])} "
+                        f"({a['anschaffungsdatum']}, "
+                        f"{a['nutzungsdauer_jahre']} Jahre ND) → "
+                        f"AfA {r['jahr']}: {e(a['afa_jahr'])}")
+            for h in r["hinweise"]:
+                out.append(f"- {'⚠️ ' if '⚠️' in h else 'ℹ️ '}{h}")
+            out.append("")
+        gesamt = sum(gew["gewinn_pro_person"].values())
+        out += [f"**Gesamtgewinn aus Gewerbe/Selbständigkeit: {e(gesamt)}** "
+               "(fließt in die Summe der Einkünfte ein).", ""]
+
     for name in ("Sonderausgaben", "Vorsorgeaufwand",
-                 "Haushaltsnahe Aufwendungen", "Außergewöhnliche Belastungen"):
+                 "Haushaltsnahe Aufwendungen", "Außergewöhnliche Belastungen",
+                 "Behinderung, Pflege & Unterhalt"):
         block = s["anlagen"].get(name)
         if not block:
             continue
@@ -390,11 +508,57 @@ def render_elster_help(s: dict, erklaeren: bool = True) -> str:
                             parts.append(str(b[f]))
                     betrag = b.get("betrag", b.get("arbeitskosten"))
                     out.append(f"- {' – '.join(parts)}: {e(_num(betrag))}")
+            elif k == "hinweise" and isinstance(v, list):
+                for h in v:
+                    out.append(f"- {h}")
             elif isinstance(v, (int, float)):
                 out.append(f"- {k.replace('_', ' ').capitalize()}: {e(v)}")
             elif isinstance(v, str):
                 out.append(f"- {v}")
         out.append("")
+
+    r = s["anlagen"].get("R")
+    if r:
+        out.append("## Anlage R – Renten")
+        erk("R")
+        gesamt_stpfl = 0.0
+        namen = {"P1": "Person 1", "P2": "Person 2"}
+        for eintrag in r["eintraege"]:
+            out += [
+                f"### {namen.get(eintrag['inhaber'], eintrag['inhaber'])} – "
+                f"`{eintrag['datei']}`",
+                f"- Jahresbetrag: {e(eintrag['jahresbetrag'])}",
+                f"- Rentenbeginn: {eintrag['rentenbeginn_jahr'] or '–'} "
+                f"→ Besteuerungsanteil {eintrag['besteuerungsanteil_prozent']:.1f} %",
+                f"- Steuerpflichtiger Anteil (Zeile 4/5 Anlage R): "
+                f"{e(eintrag['steuerpflichtiger_anteil'])}",
+                f"- Steuerfreier Anteil (NICHT eintragen): "
+                f"{e(eintrag['steuerfreier_anteil'])}",
+                "",
+            ]
+            gesamt_stpfl += eintrag["steuerpflichtiger_anteil"]
+        out += [f"**Steuerpflichtiger Rentenanteil gesamt: {e(gesamt_stpfl)}** "
+               "(fließt in die Summe der Einkünfte ein).", ""]
+
+    av = s["anlagen"].get("AV")
+    if av:
+        out.append("## Anlage AV – Riester-Rente")
+        erk("AV")
+        namen = {"P1": "Person 1", "P2": "Person 2"}
+        for p, betrag in av["beitraege"].items():
+            if betrag:
+                out.append(f"- Eigenbeitrag {namen.get(p, p)}: {e(betrag)} "
+                           f"(Höchstbetrag: {e(av['max_beitrag'])})")
+        if av["kinder_ab_2008"] or av["kinder_vor_2008"]:
+            out.append(
+                f"- Kinderzulage: {av['kinder_ab_2008']} Kind(er) ab "
+                f"Geburtsjahrgang 2008, {av['kinder_vor_2008']} davor.")
+        out += [
+            "- Die Günstigerprüfung (Sonderausgabenabzug vs. Zulage) "
+            "übernimmt das Finanzamt automatisch – Ergebnis im Rechenweg "
+            "des Tabs 'Ergebnis & ELSTER'.",
+            "",
+        ]
 
     sp = s.get("sparcheck") or {}
     if any(v > 0 for v in sp.values()):
@@ -412,6 +576,25 @@ def render_elster_help(s: dict, erklaeren: bool = True) -> str:
             if v > 0:
                 out.append(f"- {labels[k]}: {e(v)}")
         out.append("")
+
+    historie = s.get("dokumente_historie") or []
+    if historie:
+        out += ["## Anhang: Herkunft der Werte", ""]
+        for eintrag in historie:
+            out.append(f"**`{eintrag['dateiname']}`**")
+            for schritt in eintrag["historie"]:
+                von = schritt.get("von") or "–"
+                nach = schritt.get("nach") or "–"
+                quelle_label = {"automatisch": "🤖 automatisch",
+                               "chat": "💬 Chat-Klärung",
+                               "manuell": "✍️ manuell"}.get(
+                    schritt.get("quelle"), schritt.get("quelle", "–"))
+                out.append(
+                    f"- {schritt.get('zeitpunkt', '–')} · {quelle_label}: "
+                    f"{schritt.get('aktion', '–')} ({von} → {nach})"
+                    + (f" – _{schritt['begruendung']}_"
+                       if schritt.get("begruendung") else ""))
+            out.append("")
 
     out += [
         "---",

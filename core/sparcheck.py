@@ -60,10 +60,12 @@ ITEMS = [
          titel="Spenden (Geld & Sachspenden)",
          tipp="Bis 300 € je Spende reicht der Kontoauszug als Nachweis – "
               "auch Vereinsbeiträge gemeinnütziger Vereine zählen oft."),
-    dict(id="riester_ruerup", bucket="sa", pro_person=False,
-         titel="Riester-/Rürup-Beiträge",
-         tipp="Riester: bis 2.100 € inkl. Zulagen (Anlage AV). Rürup wird "
-              "über den Vorsorgeaufwand berücksichtigt."),
+    dict(id="ruerup_basisrente", bucket="vorsorge_basis", pro_person=False,
+         titel="Rürup-/Basisrente-Beiträge",
+         tipp="Seit 2023 zu 100 % abzugsfähig wie die gesetzliche "
+              "Rentenversicherung – kein 1.900-€-Deckel. Riester läuft "
+              "separat über den eigenen Fragebogen-Bereich (Anlage AV, "
+              "Günstigerprüfung Zulage vs. Sonderausgabenabzug)."),
     dict(id="kinderbetreuung", bucket="sa", pro_person=False,
          titel="Kinderbetreuung (Kita, Hort, Tagesmutter, Au-pair)",
          tipp="Abziehbar je Kind bis 14 J. – Rechnung + Überweisung nötig, "
@@ -103,24 +105,76 @@ ITEMS = [
          tipp="Wirkt erst über der zumutbaren Eigenbelastung – Kosten "
               "deshalb möglichst in EINEM Jahr bündeln (z. B. Zahn-OP + "
               "Brille zusammen)."),
-    dict(id="behinderung_pflege", bucket="agb", pro_person=False,
-         titel="Behinderten-/Pflege-Pauschbetrag, Unterstützung Angehöriger",
-         tipp="Ab GdB 20 gibt es Pauschbeträge ohne Einzelnachweis; Pflege "
-              "von Angehörigen bringt bis 1.800 € Pauschale."),
 ]
+# Behinderten-/Pflege-Pauschbetrag und § 33a-Unterhalt sind KEINE
+# Betrags-Schätzungen mehr, sondern echte Berechnungen mit eigenen
+# Fragebogen-Feldern (GdB-Stufe, Pflegegrad, Unterhaltsempfänger) – siehe
+# app.py-Expander "Behinderung, Pflege & Unterhalt" und
+# veranlagung.py::_agb_pauschbetraege_ohne_zumutbare_grenze().
 
 GRUPPEN = [
     ("wk", "👜 Werbungskosten – je Person (eigener 1.230 €-Pauschbetrag!)"),
     ("sa", "🎁 Sonderausgaben (gemeinsam)"),
+    ("vorsorge_basis", "🩺 Rürup/Basisrente (voll abzugsfähig)"),
     ("parteispenden", "🏛️ Parteispenden – 50 % direkt von der Steuer"),
     ("h35a_handwerker", "🔧 Handwerker (§ 35a – 20 % direkt von der Steuer)"),
     ("h35a_haushalt", "🏠 Haushaltsnahe Dienstleistungen (§ 35a)"),
     ("h35a_minijob", "🧾 Haushalts-Minijob (§ 35a)"),
-    ("agb", "🏥 Außergewöhnliche Belastungen"),
+    ("agb", "🏥 Außergewöhnliche Belastungen (Krankheitskosten)"),
 ]
 
+# Spar-Check-Posten, die inhaltlich mit automatisch aus hochgeladenen
+# Belegen extrahierten Beträgen überlappen (siehe veranlagung.py/
+# elster_export.py, wo dieselben Belege bereits automatisch verrechnet
+# werden) – hier droht bei zusätzlichem manuellem Eintrag eine
+# Doppelerfassung. Jeder Eintrag: Liste von (Kategorie, Feld)-Paaren, die
+# zusammen die "bereits automatisch erfasst"-Summe für den Posten ergeben.
+# Feld=None -> der generische betrag_eur des Belegs.
+_AUTOMATIK_UEBERLAPPT = {
+    "nk_abrechnung": [("nebenkostenabrechnung", "summe_haushaltsnah")],
+    # Schornsteinfeger/Heizungswartung tauchen sowohl in NK-Abrechnungen
+    # (vision.py: "posten_handwerker") als auch als eigenständige
+    # Handwerkerrechnung auf – veranlagung.py summiert beide Quellen in
+    # denselben § 35a-Handwerker-Topf.
+    "schornsteinfeger": [("nebenkostenabrechnung", "summe_handwerker"),
+                         ("handwerker_haushaltsnah", "arbeitskosten")],
+    "spenden": [("spende", None)],
+    "krankheit": [("krankheitskosten", None)],
+}
 
-def render_sparcheck(interview: dict, personen: dict):
+
+def _automatik_werte(docs: list) -> dict:
+    """Summiert je überlappendem Spar-Check-Posten, was aus hochgeladenen
+    Belegen bereits automatisch in die Rechnung eingeflossen ist."""
+    out = {item_id: 0.0 for item_id in _AUTOMATIK_UEBERLAPPT}
+    for d in docs or []:
+        kategorie = d.get("kategorie")
+        ed = d.get("extrahierte_daten", {})
+        for item_id, quellen in _AUTOMATIK_UEBERLAPPT.items():
+            for quell_kat, feld in quellen:
+                if kategorie != quell_kat:
+                    continue
+                wert = ed.get(feld) if feld else d.get("betrag_eur")
+                out[item_id] += float(wert or 0)
+    return out
+
+
+def _werbungskosten_belege_summe(docs: list, person: str) -> float:
+    """Summe hochgeladener 'werbungskosten'-Belege einer Person – fließt
+    bereits automatisch in die Werbungskosten ein (veranlagung.py Schritt
+    1). Nicht auf einzelne Spar-Check-Posten (Arbeitsmittel vs.
+    Fortbildung …) herunterbrechbar, da die Kategorie das nicht
+    unterscheidet – deshalb nur EIN gruppenweiter Hinweis statt je Posten."""
+    return sum(float(d.get("betrag_eur") or 0) for d in (docs or [])
+              if d.get("kategorie") == "werbungskosten"
+              and d.get("inhaber", "P1") == person)
+
+
+def _eur(v: float) -> str:
+    return f"{v:,.2f} €".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def render_sparcheck(interview: dict, personen: dict, docs: list = None):
     st.subheader("💰 Spar-Check – das Maximum rausholen")
     st.caption("Hake an, was auf euch zutrifft, und trag (geschätzte) Beträge "
                "ein. Alles fließt sofort in den Erstattungsrechner ein. "
@@ -128,12 +182,31 @@ def render_sparcheck(interview: dict, personen: dict):
     spar = interview.setdefault("spar", {})
     zusammen = interview.get("zusammenveranlagung", True)
     aktive = ("P1", "P2") if zusammen else ("P1",)
+    auto_werte = _automatik_werte(docs)
+    # Stand VOR den Widgets dieses Durchlaufs (aus dem letzten Rerun) – für
+    # die Zwischensummen an den Gruppen-Überschriften, damit man auch ohne
+    # Aufklappen sieht, was schon erfasst ist.
+    stand = summen(interview)
+    stand["wk"] = stand["wk_P1"] + stand["wk_P2"]
 
     for bucket, ueberschrift in GRUPPEN:
         items = [i for i in ITEMS if i["bucket"] == bucket]
-        with st.expander(ueberschrift,
+        bucket_summe = stand.get(bucket, 0.0)
+        label = ueberschrift + (f"  —  ✅ {bucket_summe:,.0f} € erfasst"
+                                .replace(",", ".") if bucket_summe else "")
+        with st.expander(label,
                          expanded=any(spar.get(i["id"], {}).get("aktiv")
                                       for i in items)):
+            if bucket == "wk":
+                for p in aktive:
+                    wk_belege = _werbungskosten_belege_summe(docs, p)
+                    if wk_belege:
+                        st.info(
+                            f"✅ **{_eur(wk_belege)}** an hochgeladenen "
+                            f"Werbungskosten-Belegen für {personen[p]} "
+                            "fließen bereits automatisch mit ein (Tab 1 · "
+                            "Dokumente) – hier nur ZUSÄTZLICHE Ausgaben "
+                            "ohne eigenen Beleg eintragen.")
             for item in items:
                 eintrag = spar.setdefault(item["id"], {})
                 aktiv = st.checkbox(item["titel"],
@@ -141,6 +214,25 @@ def render_sparcheck(interview: dict, personen: dict):
                                     key=f"sp_{item['id']}")
                 eintrag["aktiv"] = aktiv
                 st.caption("💡 " + item["tipp"])
+
+                auto_wert = auto_werte.get(item["id"], 0.0)
+                if auto_wert:
+                    auto_wert_str = _eur(auto_wert)
+                    if aktiv:
+                        st.warning(
+                            "⚠️ **Doppelerfassung-Risiko**: Aus deinen "
+                            "hochgeladenen Belegen wurden dafür bereits "
+                            f"**{auto_wert_str}** automatisch übernommen "
+                            "(Tab 1 · Dokumente). Häkchen hier nur setzen, "
+                            "wenn du ZUSÄTZLICHE, davon unabhängige Kosten "
+                            "eintragen willst – sonst bitte entfernen.")
+                    else:
+                        st.info(
+                            f"✅ **{auto_wert_str}** wurden bereits "
+                            "automatisch aus deinen hochgeladenen Belegen "
+                            "übernommen (Tab 1 · Dokumente) – hier "
+                            "normalerweise nichts zusätzlich eintragen.")
+
                 if aktiv:
                     if item["pro_person"]:
                         cols = st.columns(len(aktive))
@@ -159,12 +251,18 @@ def render_sparcheck(interview: dict, personen: dict):
                 st.markdown("")
 
     s = summen(interview)
-    st.success(
-        f"Erfasst: Werbungskosten {personen['P1']} {s['wk_P1']:,.0f} € · "
-        f"{personen['P2']} {s['wk_P2']:,.0f} € · Sonderausgaben "
-        f"{s['sa']:,.0f} € · § 35a-Arbeitskosten "
-        f"{s['h35a_handwerker'] + s['h35a_haushalt']:,.0f} € · "
-        f"a. g. Belastungen {s['agb']:,.0f} €".replace(",", "."))
+    st.divider()
+    st.markdown("**📊 Übersicht: bisher erfasst**")
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric(f"👜 WK {personen['P1']}", f"{s['wk_P1']:,.0f} €".replace(",", "."))
+    m2.metric(f"👜 WK {personen['P2']}" if zusammen else "🎁 Sonderausgaben",
+             f"{(s['wk_P2'] if zusammen else s['sa']):,.0f} €".replace(",", "."))
+    m3.metric("🔧🏠 § 35a-Arbeitskosten",
+             f"{s['h35a_handwerker'] + s['h35a_haushalt']:,.0f} €"
+             .replace(",", "."),
+             help="20 % davon werden direkt von der Steuer abgezogen.")
+    m4.metric("🏥 Außergew. Belastungen",
+             f"{s['agb']:,.0f} €".replace(",", "."))
 
 
 def summen(interview: dict) -> dict:
@@ -172,7 +270,7 @@ def summen(interview: dict) -> dict:
     spar = interview.get("spar", {})
     out = {"wk_P1": 0.0, "wk_P2": 0.0, "sa": 0.0, "parteispenden": 0.0,
            "h35a_handwerker": 0.0, "h35a_haushalt": 0.0,
-           "h35a_minijob": 0.0, "agb": 0.0}
+           "h35a_minijob": 0.0, "agb": 0.0, "vorsorge_basis": 0.0}
     for item in ITEMS:
         e = spar.get(item["id"], {})
         if not e.get("aktiv"):

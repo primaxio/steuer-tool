@@ -4,7 +4,12 @@ Dokumentkategorie und ELSTER-Abschnitt sowie der "Frag nach"-Chat
 (Claude erklärt mit den echten Zahlen des Nutzers – keine Rechtsberatung).
 """
 
+import json
+
 import anthropic
+
+from .categories import CATEGORIES
+from .vision import _parse_json
 
 GLOSSAR = {
     "Steuererklärung": "Deine Jahres-Abrechnung mit dem Staat: Du meldest, was du verdient und beruflich/privat ausgegeben hast. Das Finanzamt vergleicht das mit der Steuer, die dein Arbeitgeber schon monatlich abgeführt hat – zu viel gezahlt = Erstattung, zu wenig = Nachzahlung.",
@@ -41,12 +46,15 @@ KATEGORIE_ERKLAERUNG = {
     "steuerbescheinigung_bank": "Zeigt deine Aktien-/Zinserträge und die bereits abgezogene Steuer. Damit holst du dir zu viel gezahlte Abgeltungsteuer zurück, z. B. wenn der Freistellungsauftrag nicht ausgeschöpft war.",
     "krypto_report": "Die Übersicht deiner Krypto-Verkäufe. Entscheidend: Was wurde unter 1 Jahr Haltefrist verkauft (steuerpflichtig) und was darüber (steuerfrei)?",
     "werbungskosten": "Ein beruflicher Ausgabenbeleg (Laptop, Fachbuch, Fortbildung). Lohnt sich, sobald deine gesamten Werbungskosten über 1.230 € liegen – jeder Euro darüber senkt deine Steuer.",
-    "vorsorge_versicherung": "Versicherungsbeiträge (Haftpflicht, BU, Kranken-/Pflegeversicherung) sind als Vorsorgeaufwand absetzbar – oft vergessen, oft mehrere hundert Euro wert.",
+    "vorsorge_versicherung": "Versicherungsbeiträge (Haftpflicht, BU, Kranken-/Pflegeversicherung) sind als Vorsorgeaufwand absetzbar. Kranken-/Pflegeversicherung zählt IMMER voll. Zusatzversicherungen (Haftpflicht, BU) zählen nur, wenn dein Kranken-/Pflegeversicherungs-Beitrag den jährlichen Höchstbetrag (1.900 € pro Person) noch nicht ausgeschöpft hat – bei gesetzlich Versicherten meist schon der Fall, trotzdem eintragen, schadet nie.",
     "spende": "Spenden an gemeinnützige Organisationen senken als Sonderausgaben direkt dein zu versteuerndes Einkommen.",
     "handwerker_haushaltsnah": "20 % der ARBEITSKOSTEN (nicht Material!) von Handwerkern oder Haushaltshilfen zieht das Finanzamt direkt von deiner Steuer ab. Bedingung: per Überweisung bezahlt, niemals bar.",
     "nebenkostenabrechnung": "Deine Betriebskostenabrechnung enthält versteckte Steuer-Rabatte: 20 % der Lohnkosten für Hausmeister, Treppenhausreinigung & Co. zieht das Finanzamt direkt von der Steuer ab. Das Tool hat die begünstigten Posten automatisch herausgesucht – Grundsteuer, Wasser und Heizöl zählen nicht.",
     "broker_steuerbericht": "Der offizielle Jahresbericht deines Brokers. Termingeschäfte (CFDs) und Zinsen wurden automatisch in die Anlage KAP übernommen – dort werden sie mit ~26,4 % besteuert, weil Auslandsbroker keine Steuer einbehalten. Der Krypto-Wert dient als Kontrollzahl.",
     "krankheitskosten": "Arzt-, Zahnarzt-, Brillenkosten zählen als außergewöhnliche Belastung – aber erst oberhalb deiner 'zumutbaren Belastung' (einige Prozent des Einkommens). Sammeln lohnt in teuren Jahren.",
+    "rentenbezugsmitteilung": "Die jährliche Mitteilung deines Rentenversicherungsträgers über den Jahresbetrag deiner Rente. Wichtig: Nicht die volle Rente ist steuerpflichtig, sondern nur ein fester Prozentsatz, der sich einmalig nach deinem Rentenbeginn-Jahr richtet ('Besteuerungsanteil') – der Rest bleibt dauerhaft steuerfrei.",
+    "betrieb_einnahme": "Eine Einnahme aus deinem Betrieb oder Nebengewerbe (z. B. eine Gutschrift vom Energieversorger für verkauften Strom/Wärme). Ordne sie im Tab 'Betrieb' dem richtigen Betrieb zu – zusammen mit den Ausgaben ergibt das deinen Gewinn (Einnahmen-Überschuss-Rechnung).",
+    "betrieb_ausgabe": "Eine Ausgabe deines Betriebs (Wartung, Material, Anschaffung). Sie mindert deinen Gewinn – bei größeren Anschaffungen (Anlagegütern) wird der Betrag nicht auf einmal, sondern über mehrere Jahre verteilt abgeschrieben (AfA).",
     "sonstiges": "Konnte nicht sicher zugeordnet werden – bitte einmal kurz prüfen und die richtige Kategorie wählen.",
 }
 
@@ -55,9 +63,13 @@ ANLAGEN_ERKLAERT = {
     "KAP": "💡 *Einfach erklärt: Deine Bank hat auf Aktiengewinne pauschal 25 % Steuer abgezogen. Hier prüfst du, ob das zu viel war – etwa weil der Sparer-Pauschbetrag (2.000 € für euch beide) nicht genutzt wurde. Meist gibt es hier Geld zurück.*",
     "SO": "💡 *Einfach erklärt: Hier kommen NUR Krypto-Verkäufe rein, die unter 1 Jahr gehalten wurden. Länger gehaltene Coins sind komplett steuerfrei und tauchen gar nicht erst auf. Achtung Freigrenze: Ab 1.000 € Gewinn pro Person wird der GESAMTE Gewinn steuerpflichtig – nicht nur der Teil darüber.*",
     "Sonderausgaben": "💡 *Einfach erklärt: Private Ausgaben, die der Staat trotzdem belohnt – vor allem Spenden und Kirchensteuer.*",
-    "Vorsorgeaufwand": "💡 *Einfach erklärt: Deine Versicherungsbeiträge. Kranken- und Pflegeversicherung zählen fast immer voll.*",
+    "Vorsorgeaufwand": "💡 *Einfach erklärt: Deine Versicherungsbeiträge. Kranken- und Pflegeversicherung zählen IMMER voll. Für zusätzliche Versicherungen (Haftpflicht, BU) gibt es einen Deckel von 1.900 € pro Person – der ist bei den meisten Angestellten durch die Kranken-/Pflegeversicherung aber schon ausgeschöpft.*",
     "Haushaltsnahe Aufwendungen": "💡 *Einfach erklärt: 20 % der Handwerker-Arbeitskosten werden dir DIREKT von der Steuer abgezogen – das ist bares Geld, kein bloßer Abzugsposten.*",
     "Außergewöhnliche Belastungen": "💡 *Einfach erklärt: Hohe Krankheitskosten zählen erst, wenn sie deine 'zumutbare' Eigenbeteiligung übersteigen.*",
+    "Gewerbe & Selbständigkeit (EÜR)": "💡 *Einfach erklärt: Betreibst du nebenbei ein Gewerbe (z. B. Stromverkauf) oder arbeitest freiberuflich, zählt hier NICHT der Umsatz, sondern der GEWINN: Einnahmen minus Ausgaben minus Abschreibungen (AfA – große Anschaffungen werden über mehrere Jahre verteilt abgezogen, nicht auf einmal). Dieser Gewinn wird wie Gehalt zu deinem übrigen Einkommen addiert.*",
+    "R": "💡 *Einfach erklärt: Von deiner Rente ist NICHT alles steuerpflichtig – nur ein fester Prozentsatz, der sich einmalig nach deinem Rentenbeginn-Jahr richtet. Wer 2005 oder früher in Rente ging, versteuert nur 50 %; wer erst 2058 oder später beginnt, 100 %. Der Rest bleibt für immer steuerfrei.*",
+    "AV": "💡 *Einfach erklärt: Für Riester-Beiträge bekommst du entweder die staatliche Zulage ODER den Steuervorteil aus dem Sonderausgabenabzug – das Finanzamt gibt dir automatisch das Bessere von beidem. Die Zulage bekommst du in jedem Fall, den Steuervorteil nur, wenn er höher ist.*",
+    "Behinderung, Pflege & Unterhalt": "💡 *Einfach erklärt: Bei Behinderung, Pflege von Angehörigen oder Unterhaltszahlungen gibt es feste Pauschbeträge, die – anders als normale Krankheitskosten – SOFORT und OHNE Abzug einer 'zumutbaren Eigenbelastung' wirken.*",
 }
 
 STEUER_101 = """
@@ -114,3 +126,57 @@ def frag_steuerberater(frage: str, kontext: str, verlauf: list,
         + (kontext or "noch keine Daten erfasst"),
         messages=messages)
     return "".join(b.text for b in resp.content if b.type == "text")
+
+
+KLAERUNGS_CHAT_SYSTEM = """Du bist ein erfahrener deutscher Steuerberater. Ein Beleg in der
+Steuer-Software konnte nicht sicher automatisch eingeordnet werden. Du sprichst mit dem
+Nutzer, um ihn korrekt zuzuordnen (Kategorie, Person, ggf. Betrieb, Steuerjahr, Betrag).
+
+Verfügbare Kategorien (Schlüssel exakt so verwenden):
+{kategorien}
+
+Kontext zu diesem Beleg, den Personen und angelegten Betrieben (JSON):
+{kontext}
+
+Regeln:
+- Stelle GEZIELTE Rückfragen, wenn etwas fehlt (z. B. wem der Beleg gehört, zu welchem
+  Betrieb er zählt, welches Jahr gemeint ist) – eine Frage nach der anderen, keine Liste.
+- Nutze die extrahierten Daten des Belegs als Ausgangspunkt, wiederhole sie nicht stur.
+- Antworte AUSSCHLIESSLICH mit einem JSON-Objekt, kein Text davor oder danach:
+{{"antwort": "<verständliche Erklärung oder konkrete Rückfrage an den Nutzer, Alltagssprache>",
+  "vorschlag": {{"kategorie": "<Schlüssel oder null>", "inhaber": "P1"|"P2"|null,
+                "betrieb": "<Name oder null>", "steuerjahr": <Jahr als Zahl oder null>,
+                "betrag_eur": <Zahl oder null>,
+                "begruendung": "<kurze steuerliche Begründung für die Zuordnung>"}},
+  "sicher": true/false}}
+- "sicher": true NUR, wenn du eine konkrete, steuerlich begründete Zuordnung anbieten
+  kannst UND keine wesentliche Rückfrage mehr offen ist. Sonst false – dann enthält
+  "antwort" eine konkrete Rückfrage und "vorschlag" bleibt unvollständig (null-Felder).
+- Kurze, klare Alltagssprache – der Nutzer ist Steuer-Laie."""
+
+
+def klaerungs_chat(dokument: dict, frage: str, verlauf: list, api_key: str,
+                   model: str, personen: dict | None = None,
+                   betriebe: list | None = None) -> dict:
+    """Chat zur Klärung eines unsicher erkannten Dokuments. Gibt
+    {"antwort", "vorschlag": {...}, "sicher": bool} zurück."""
+    kategorien_zeilen = "\n".join(
+        f'- "{k}": {v["label"]}' for k, v in CATEGORIES.items())
+    kontext = {
+        "dokument": {k: v for k, v in dokument.items() if k != "_bytes"},
+        "personen": personen or {},
+        "betriebe": [getattr(b, "name", b) for b in (betriebe or [])],
+    }
+    system = KLAERUNGS_CHAT_SYSTEM.format(
+        kategorien=kategorien_zeilen,
+        kontext=json.dumps(kontext, ensure_ascii=False, default=str))
+    client = anthropic.Anthropic(api_key=api_key)
+    messages = list(verlauf) + [{"role": "user", "content": frage}]
+    resp = client.messages.create(model=model, max_tokens=1000, system=system,
+                                  messages=messages)
+    raw = "".join(b.text for b in resp.content if b.type == "text")
+    result = _parse_json(raw)
+    result.setdefault("antwort", raw)
+    result.setdefault("vorschlag", {})
+    result.setdefault("sicher", False)
+    return result

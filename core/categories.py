@@ -94,6 +94,34 @@ CATEGORIES = {
         "anlage": "Anlage Außergewöhnliche Belastungen",
         "beschreibung": "Arzt-, Zahnarzt-, Brillen-, Medikamentenrechnungen etc.",
     },
+    "betrieb_einnahme": {
+        "label": "Betriebseinnahme (Gutschrift, Ausgangsrechnung)",
+        "anlage": "Anlage G/S – Einnahmen-Überschuss-Rechnung (EÜR)",
+        "beschreibung": (
+            "Einnahme eines Betriebs/Nebengewerbes, z. B. Gutschrift/"
+            "Abrechnung des Energieversorgers oder eigene Ausgangsrechnung. "
+            "Wird im Tab 'Betrieb' einem angelegten Betrieb zugeordnet."
+        ),
+    },
+    "rentenbezugsmitteilung": {
+        "label": "Rentenbezugsmitteilung (gesetzliche Rente/Rürup)",
+        "anlage": "Anlage R",
+        "beschreibung": (
+            "Jährliche Mitteilung des Rentenversicherungsträgers an das "
+            "Finanzamt über den Jahresbetrag der Rente. Nur ein fester, "
+            "vom Rentenbeginn-Jahr abhängiger Prozentsatz ist "
+            "steuerpflichtig (Besteuerungsanteil)."
+        ),
+    },
+    "betrieb_ausgabe": {
+        "label": "Betriebsausgabe (Wartung, Material, Anschaffung)",
+        "anlage": "Anlage G/S – Einnahmen-Überschuss-Rechnung (EÜR)",
+        "beschreibung": (
+            "Ausgabe eines Betriebs/Nebengewerbes, z. B. Wartung, Material "
+            "oder Anschaffung eines Anlageguts (AfA). Wird im Tab 'Betrieb' "
+            "einem angelegten Betrieb zugeordnet."
+        ),
+    },
     "sonstiges": {
         "label": "Sonstiges / Unklar",
         "anlage": "— manuell zuordnen —",

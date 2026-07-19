@@ -2,12 +2,116 @@
 Ausgelagert aus app.py, damit sowohl der Experten-Tab als auch der
 Einfache-Modus-Wizard dieselbe Logik nutzen (keine Duplikate)."""
 
+import base64
+from datetime import datetime
+
 import streamlit as st
 
 from . import categories as cat
-from .erklaerungen import KATEGORIE_ERKLAERUNG
-from .jahr_zuordnung import bestimme_steuerjahr, docs_im_jahr, jahres_uebersicht
+from .erklaerungen import KATEGORIE_ERKLAERUNG, klaerungs_chat
+from .jahr_zuordnung import (bestimme_steuerjahr, docs_im_jahr,
+                             ist_im_jahr, jahres_uebersicht)
 from .vision import SUPPORTED_IMAGE_TYPES, analyze_document
+
+
+def _historie_eintrag(d: dict, aktion: str, von, nach, quelle: str,
+                      begruendung: str = ""):
+    d.setdefault("zuordnungs_historie", []).append({
+        "zeitpunkt": datetime.now().isoformat(timespec="seconds"),
+        "aktion": aktion, "von": von, "nach": nach, "quelle": quelle,
+        "begruendung": begruendung,
+    })
+
+
+def _uebernehme_chat_vorschlag(d: dict, v: dict):
+    """Wendet den Klärungs-Chat-Vorschlag an, protokolliert die
+    Zuordnungs-Historie und deaktiviert den Klärungsbedarf."""
+    alte_kategorie = d.get("kategorie")
+    begruendung = v.get("begruendung") or "Per Chat geklärt."
+    if v.get("kategorie") and v["kategorie"] in cat.category_options():
+        d["kategorie"] = v["kategorie"]
+        d["confidence"] = 1.0
+    if v.get("inhaber") in ("P1", "P2"):
+        d["inhaber"] = v["inhaber"]
+    if v.get("betrieb"):
+        d["betrieb"] = v["betrieb"]
+    if v.get("steuerjahr"):
+        try:
+            d["steuerjahr_zuordnung"] = int(v["steuerjahr"])
+        except (TypeError, ValueError):
+            pass
+    if v.get("betrag_eur") is not None:
+        d["betrag_eur"] = v["betrag_eur"]
+    d["klaerungsbedarf"] = False
+    _historie_eintrag(d, "Chat-Klärung", alte_kategorie, d.get("kategorie"),
+                      "chat", begruendung)
+    d.setdefault("hinweise", []).append(
+        f"Zuordnung per Chat bestätigt: {begruendung}")
+
+
+def _render_klaerung_bereich(api_key: str, model: str, personen: dict):
+    unklare = [d for d in st.session_state.docs if d.get("klaerungsbedarf")]
+    if not unklare:
+        return
+    st.subheader(f"❓ Klärung nötig ({len(unklare)})")
+    st.caption("Diese Belege konnten nicht sicher automatisch eingeordnet "
+               "werden. Chatte kurz mit dem Steuerberater-Assistenten – "
+               "danach wird der Beleg automatisch richtig einsortiert.")
+    for d in unklare:
+        conf = d.get("confidence") or 0
+        with st.expander(f"❓ {d['dateiname']} → aktuell "
+                         f"{cat.label_of(d['kategorie'])} ({conf:.0%})"):
+            st.markdown(
+                f"**Typ:** {d.get('dokumenttyp', '–')}  \n"
+                f"**Aussteller:** {d.get('aussteller') or '–'}  \n"
+                f"**Betrag:** "
+                f"{d.get('betrag_eur') if d.get('betrag_eur') is not None else '–'} €")
+            for q in d.get("rueckfragen", []):
+                st.info(f"❓ {q}")
+
+            verlauf_key = f"klaerchat_{d['dateiname']}"
+            st.session_state.setdefault(verlauf_key, [])
+            verlauf = st.session_state[verlauf_key]
+            for msg in verlauf:
+                with st.chat_message(msg["role"]):
+                    st.markdown(msg["content"])
+
+            frage = st.chat_input(
+                "Antworte hier, um den Beleg zuzuordnen …",
+                key=f"ci_{d['dateiname']}", disabled=not api_key)
+            if frage:
+                verlauf.append({"role": "user", "content": frage})
+                with st.spinner("Denke nach …"):
+                    try:
+                        result = klaerungs_chat(
+                            d, frage, verlauf[:-1], api_key, model, personen,
+                            st.session_state.get("betriebe", []))
+                    except Exception as exc:  # noqa: BLE001
+                        result = {"antwort": f"Fehler bei der Anfrage: {exc}",
+                                  "sicher": False, "vorschlag": {}}
+                verlauf.append({"role": "assistant",
+                               "content": result.get("antwort", "")})
+                st.session_state[f"{verlauf_key}_vorschlag"] = result
+                st.rerun()
+            if not api_key:
+                st.caption("API-Key in der Seitenleiste eintragen, um zu chatten.")
+
+            letzter = st.session_state.get(f"{verlauf_key}_vorschlag")
+            if letzter and letzter.get("sicher"):
+                v = letzter.get("vorschlag", {})
+                st.success(
+                    f"**Vorschlag:** "
+                    f"{cat.label_of(v['kategorie']) if v.get('kategorie') else '–'} "
+                    f"· {personen.get(v.get('inhaber'), '–')} "
+                    f"· Jahr {v.get('steuerjahr') or '–'} "
+                    f"· {v.get('betrag_eur') if v.get('betrag_eur') is not None else '–'} €"
+                    f"\n\n_{v.get('begruendung', '')}_")
+                if st.button("✅ Zuordnung übernehmen",
+                             key=f"apply_{d['dateiname']}"):
+                    _uebernehme_chat_vorschlag(d, v)
+                    st.session_state[f"{verlauf_key}_vorschlag"] = None
+                    st.rerun()
+    st.divider()
 
 
 def render_dokumente_tab(cfg: dict, api_key: str, model: str,
@@ -29,34 +133,55 @@ def render_dokumente_tab(cfg: dict, api_key: str, model: str,
     if new_files and st.button(
             f"🔍 {len(new_files)} neue(s) Dokument(e) analysieren",
             type="primary", disabled=not api_key):
-        progress = st.progress(0.0)
-        for i, up in enumerate(new_files):
-            mime = up.type if up.type in SUPPORTED_IMAGE_TYPES | \
-                {"application/pdf"} else "application/pdf"
-            try:
-                result = analyze_document(
-                    up.getvalue(), mime, up.name, api_key, cfg["jahr"], model)
-                zuordnung = bestimme_steuerjahr(result)
-                if zuordnung is None:
-                    zuordnung = cfg["jahr"]
-                    result["rueckfragen"].append(
-                        "Kein Datum erkennbar – Beleg wurde dem aktuellen "
-                        f"Steuerjahr {cfg['jahr']} zugeordnet, bitte prüfen.")
-                result["steuerjahr_zuordnung"] = zuordnung
-                st.session_state.docs.append(result)
-                st.session_state.analyzed_files.add(up.name)
-            except Exception as exc:  # noqa: BLE001
-                st.error(f"Fehler bei '{up.name}': {exc}")
-            progress.progress((i + 1) / len(new_files))
+        # st.status() zeigt SOFORT (noch bevor der erste, evtl. langsame
+        # API-Call zurückkommt) einen Spinner + Label – so ist unmittelbar
+        # sichtbar, dass der Klick angekommen ist und gerade gearbeitet
+        # wird, statt dass bis zum ersten Fortschrittsschritt Stille
+        # herrscht.
+        with st.status(f"Analysiere {len(new_files)} Dokument(e) …",
+                       expanded=True) as status:
+            progress = st.progress(0.0)
+            for i, up in enumerate(new_files):
+                status.update(
+                    label=f"🔍 Analysiere „{up.name}“ ({i + 1}/"
+                          f"{len(new_files)}) …")
+                mime = up.type if up.type in SUPPORTED_IMAGE_TYPES | \
+                    {"application/pdf"} else "application/pdf"
+                try:
+                    result = analyze_document(
+                        up.getvalue(), mime, up.name, api_key, cfg["jahr"],
+                        model)
+                    zuordnung = bestimme_steuerjahr(result)
+                    if zuordnung is None:
+                        zuordnung = cfg["jahr"]
+                        result["rueckfragen"].append(
+                            "Kein Datum erkennbar – Beleg wurde dem "
+                            f"aktuellen Steuerjahr {cfg['jahr']} "
+                            "zugeordnet, bitte prüfen.")
+                    result["steuerjahr_zuordnung"] = zuordnung
+                    result["_bytes"] = base64.b64encode(
+                        up.getvalue()).decode("ascii")
+                    result["_mime"] = mime
+                    st.session_state.docs.append(result)
+                    st.session_state.analyzed_files.add(up.name)
+                    status.write(f"✅ „{up.name}“ → "
+                                f"{cat.label_of(result['kategorie'])}")
+                except Exception as exc:  # noqa: BLE001
+                    status.write(f"❌ Fehler bei „{up.name}“: {exc}")
+                progress.progress((i + 1) / len(new_files))
+            status.update(label=f"{len(new_files)} Dokument(e) analysiert",
+                         state="complete")
         st.rerun()
     if new_files and not api_key:
         st.info("Bitte zuerst den API-Key in der Seitenleiste eintragen.")
+
+    _render_klaerung_bereich(api_key, model, personen)
 
     if st.session_state.docs:
         st.divider()
         docs_aktuell = docs_im_jahr(st.session_state.docs, cfg["jahr"])
         docs_andere = [d for d in st.session_state.docs
-                       if d not in docs_aktuell]
+                       if not ist_im_jahr(d, cfg["jahr"])]
         st.subheader(f"Belege für Steuerjahr {cfg['jahr']} "
                      f"({len(docs_aktuell)})")
         if docs_andere:
@@ -66,8 +191,7 @@ def render_dokumente_tab(cfg: dict, api_key: str, model: str,
                 if j) + " – in der Seitenleiste das Steuerjahr wechseln, "
                 "um sie zu bearbeiten. Gespeichert bleiben alle.")
         for i, d in enumerate(st.session_state.docs):
-            im_jahr = d in docs_aktuell
-            if not im_jahr:
+            if not ist_im_jahr(d, cfg["jahr"]):
                 continue
             conf = d.get("confidence") or 0
             icon = "🟢" if conf >= 0.85 else ("🟡" if conf >= 0.7 else "🔴")
@@ -95,6 +219,12 @@ def render_dokumente_tab(cfg: dict, api_key: str, model: str,
                     for q in d.get("rueckfragen", []):
                         st.info(f"❓ {q}")
                 with c2:
+                    if d.get("_bytes"):
+                        st.download_button(
+                            "📥 Original-Beleg", base64.b64decode(d["_bytes"]),
+                            file_name=d["dateiname"],
+                            mime=d.get("_mime", "application/octet-stream"),
+                            key=f"dl_{i}", use_container_width=True)
                     inh = st.selectbox(
                         "Gehört zu", ["P1", "P2"],
                         index=0 if d.get("inhaber", "P1") == "P1" else 1,
@@ -107,9 +237,24 @@ def render_dokumente_tab(cfg: dict, api_key: str, model: str,
                         index=keys.index(d["kategorie"]),
                         format_func=cat.label_of, key=f"cat_{i}")
                     if new_cat != d["kategorie"]:
+                        _historie_eintrag(d, "Kategorie manuell korrigiert",
+                                         d["kategorie"], new_cat, "manuell")
                         d["kategorie"] = new_cat
                         d["confidence"] = 1.0
                         st.rerun()
+                    if d["kategorie"] in ("betrieb_einnahme", "betrieb_ausgabe"):
+                        betriebe = st.session_state.get("betriebe", [])
+                        if betriebe:
+                            namen = [b.name for b in betriebe]
+                            aktuell = d.get("betrieb")
+                            d["betrieb"] = st.selectbox(
+                                "Gehört zu Betrieb", namen,
+                                index=namen.index(aktuell)
+                                if aktuell in namen else 0,
+                                key=f"betr_{i}")
+                        else:
+                            st.caption("⚠️ Noch kein Betrieb angelegt – "
+                                      "im Tab 🏭 Betrieb zuerst anlegen.")
                     d["steuerjahr_zuordnung"] = st.number_input(
                         "Steuerjahr", 2020, 2035,
                         int(d.get("steuerjahr_zuordnung", cfg["jahr"])),
@@ -131,7 +276,7 @@ def render_dokumente_tab(cfg: dict, api_key: str, model: str,
             with st.expander(f"📦 Geparkte Belege anderer Jahre "
                              f"({len(docs_andere)})"):
                 for i, d in enumerate(st.session_state.docs):
-                    if d in docs_andere:
+                    if not ist_im_jahr(d, cfg["jahr"]):
                         c1, c2 = st.columns([3, 1])
                         c1.markdown(
                             f"`{d['dateiname']}` – "

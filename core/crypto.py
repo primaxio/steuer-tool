@@ -4,7 +4,7 @@ Haltefrist-Logik (§ 23 EStG), Optimizer für offene Positionen und
 Steuerschätzung nach § 32a EStG (inkl. Splitting-Verfahren).
 """
 
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, asdict
 from datetime import date, datetime, timedelta
 from collections import deque
 
@@ -83,14 +83,47 @@ def _jahrestag(d: date) -> date:
         return d.replace(year=d.year + 1, month=2, day=28)
 
 
-# --------------------------------------------------------------- FIFO
-def run_fifo(txs: list[NormTx]) -> tuple[list[Disposal], list[OpenLot],
-                                         list[NormTx], list[str]]:
-    """Walletbezogene FIFO je (Inhaber, Depot, Asset).
-    Rewards zählen als Anschaffung zum Marktwert UND als Einnahme (§ 22 Nr. 3).
-    Rückgabe: (Veräußerungen, offene Lots, Reward-Txs, Warnungen)."""
+def _match_wallet_transfers(txs: list[NormTx]) -> dict[int, int]:
+    """Verknüpft transfer_out↔transfer_in-Paare zwischen EIGENEN Wallets
+    desselben Inhabers/Assets (unterschiedliches Depot, Empfang zeitnah nach
+    Versand, empfangene Menge ≤ versendete Menge wegen Netzwerkgebühr).
+    Greedy nächster Treffer, jede Seite höchstens einmal verknüpft.
+    Rückgabe: {id(transfer_in): id(transfer_out)}."""
+    outs = [t for t in txs if t.typ == "transfer_out"]
+    ins = [t for t in txs if t.typ == "transfer_in"]
+    used_ins: set[int] = set()
+    matched_in_to_out: dict[int, int] = {}
+    for t_out in sorted(outs, key=lambda x: x.ts):
+        kandidaten = [
+            t_in for t_in in ins
+            if id(t_in) not in used_ins
+            and t_in.inhaber == t_out.inhaber
+            and t_in.asset.upper() == t_out.asset.upper()
+            and t_in.depot != t_out.depot
+            and t_out.ts - timedelta(hours=1) <= t_in.ts
+            <= t_out.ts + timedelta(days=7)
+            and t_out.menge * 0.90 <= t_in.menge <= t_out.menge * 1.001
+        ]
+        if not kandidaten:
+            continue
+        beste = min(kandidaten,
+                   key=lambda x: abs((x.ts - t_out.ts).total_seconds()))
+        matched_in_to_out[id(beste)] = id(t_out)
+        used_ins.add(id(beste))
+    return matched_in_to_out
+
+
+def _run_fifo_pass(txs: list[NormTx], overrides: dict[int, list],
+                   matched_in_ids: set, matched_out_ids: set):
+    """Ein FIFO-Durchlauf über alle (Inhaber, Depot, Asset)-Gruppen.
+    `overrides`: id(transfer_in) -> Liste [restmenge, restkosten, kauf_ts]
+    (aus einem verknüpften transfer_out übernommene Sub-Lots statt einer
+    frischen Anschaffung). `sublots_by_out` sammelt die von JEDEM
+    transfer_out tatsächlich konsumierten Sub-Lots – Grundlage für die
+    Verknüpfung im zweiten Durchlauf (siehe run_fifo)."""
     disposals, open_lots, warnungen = [], [], []
     rewards = [t for t in txs if t.typ == "reward"]
+    sublots_by_out: dict[int, list] = {}
 
     gruppen: dict[tuple, list[NormTx]] = {}
     for t in txs:
@@ -103,10 +136,16 @@ def run_fifo(txs: list[NormTx]) -> tuple[list[Disposal], list[OpenLot],
                 0 if x.typ in ("kauf", "reward", "transfer_in") else 1,
                 x.ts)):  # tagesweise: Zugänge vor Abgängen (Settlement-Timing)
             if t.typ in ("kauf", "reward", "transfer_in"):
+                if t.typ == "transfer_in" and id(t) in overrides:
+                    for sub_menge, sub_kosten, sub_ts in overrides[id(t)]:
+                        if sub_menge > EPS:
+                            lots.append([sub_menge, sub_kosten, sub_ts])
+                    continue
                 if t.menge <= EPS:
                     continue  # Null-Mengen erzeugen keine Lots
                 kosten = t.wert_eur + (t.gebuehr_eur if t.typ == "kauf" else 0)
-                if t.typ == "transfer_in" and t.wert_eur <= 0:
+                if t.typ == "transfer_in" and t.wert_eur <= 0 \
+                        and id(t) not in matched_in_ids:
                     warnungen.append(
                         f"{asset} ({depot}): Eingehender Transfer am "
                         f"{t.ts:%d.%m.%Y} ohne Anschaffungsdaten – Haltefrist/"
@@ -151,31 +190,73 @@ def run_fifo(txs: list[NormTx]) -> tuple[list[Disposal], list[OpenLot],
                 # Steuerneutraler Übertrag: Coins verlassen den Topf MIT
                 # ihren Anschaffungsdaten (FIFO), ohne Veräußerung.
                 rest = t.menge
+                konsumiert = []
                 while rest > EPS and lots:
                     lot = lots[0]
                     if lot[0] <= EPS:
                         lots.popleft()
                         continue
                     nutze = min(rest, lot[0])
-                    lot[1] -= lot[1] * (nutze / lot[0])
+                    lot_kosten_anteil = lot[1] * (nutze / lot[0])
+                    konsumiert.append([nutze, round(lot_kosten_anteil, 2), lot[2]])
+                    lot[1] -= lot_kosten_anteil
                     lot[0] -= nutze
                     rest -= nutze
                     if lot[0] <= EPS:
                         lots.popleft()
+                sublots_by_out[id(t)] = konsumiert
                 if rest > EPS:
                     warnungen.append(
                         f"{asset} ({depot}): Auszahlung am {t.ts:%d.%m.%Y} "
                         f"übersteigt Bestand um {rest:.8g} – Historie prüfen!")
-                warnungen.append(
-                    f"{asset} ({depot}): Auszahlung {t.menge:.8g} am "
-                    f"{t.ts:%d.%m.%Y} steuerneutral ausgebucht – Zielwallet "
-                    "übernimmt Kaufdatum/Kosten (bei Zahlung an Dritte wäre "
-                    "es eine Veräußerung!).")
+                if id(t) in matched_out_ids:
+                    warnungen.append(
+                        f"{asset} ({depot}): Auszahlung {t.menge:.8g} am "
+                        f"{t.ts:%d.%m.%Y} ✅ automatisch mit dem "
+                        "Empfänger-Wallet verknüpft – Haltefrist und "
+                        "Kostenbasis wurden steuerneutral übernommen.")
+                else:
+                    warnungen.append(
+                        f"{asset} ({depot}): Auszahlung {t.menge:.8g} am "
+                        f"{t.ts:%d.%m.%Y} steuerneutral ausgebucht – kein "
+                        "passender Eingang in einer anderen erfassten "
+                        "Wallet gefunden, Zielwallet übernimmt Kaufdatum/"
+                        "Kosten NICHT automatisch (bei Zahlung an Dritte "
+                        "wäre es ohnehin eine Veräußerung!).")
         for lot in lots:
             if lot[0] > EPS:
                 open_lots.append(OpenLot(
                     asset=asset, menge=round(lot[0], 10), kauf_ts=lot[2],
                     kosten_eur=round(lot[1], 2), depot=depot, inhaber=inhaber))
+    return disposals, open_lots, rewards, warnungen, sublots_by_out
+
+
+# --------------------------------------------------------------- FIFO
+def run_fifo(txs: list[NormTx]) -> tuple[list[Disposal], list[OpenLot],
+                                         list[NormTx], list[str]]:
+    """Walletbezogene FIFO je (Inhaber, Depot, Asset).
+    Rewards zählen als Anschaffung zum Marktwert UND als Einnahme (§ 22 Nr. 3).
+    Transfers zwischen EIGENEN Wallets (transfer_out ↔ transfer_in, gleicher
+    Inhaber/Asset, unterschiedliches Depot) werden automatisch verknüpft:
+    Die Haltefrist und Kostenbasis der Herkunfts-Lots wandert steuerneutral
+    mit ins Ziel-Depot, statt dort als frische Anschaffung mit neuem Datum
+    zu starten (sonst würde die Haltefrist beim reinen Wallet-Wechsel
+    fälschlich neu zu laufen beginnen).
+    Rückgabe: (Veräußerungen, offene Lots, Reward-Txs, Warnungen)."""
+    matched_in_to_out = _match_wallet_transfers(txs)
+    _, _, _, _, sublots_by_out = _run_fifo_pass(txs, {}, set(), set())
+
+    overrides = {}
+    matched_in_ids, matched_out_ids = set(), set()
+    for in_id, out_id in matched_in_to_out.items():
+        sublots = sublots_by_out.get(out_id)
+        if sublots:
+            overrides[in_id] = sublots
+            matched_in_ids.add(in_id)
+            matched_out_ids.add(out_id)
+
+    disposals, open_lots, rewards, warnungen, _ = _run_fifo_pass(
+        txs, overrides, matched_in_ids, matched_out_ids)
     return disposals, open_lots, rewards, warnungen
 
 

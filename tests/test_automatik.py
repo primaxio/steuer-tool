@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core.checks import run_checks
 from core.elster_export import build_summary, render_elster_help
+from core.sparcheck import _automatik_werte, _werbungskosten_belege_summe
 from core.tax_config import get_config
 from core.veranlagung import berechne_veranlagung
 
@@ -94,8 +95,76 @@ def test_veranlagung_ermaessigung():
           "Broker-Warnhinweis vorhanden")
 
 
+def test_sparcheck_automatik_werte():
+    """Spar-Check-Tab (Doppelerfassungs-Hinweis direkt am Eingabefeld,
+    siehe app.py) liest dieselben Summen wie checks.py/veranlagung.py –
+    für ALLE überlappenden Posten, nicht nur die NK-Abrechnung."""
+    werte = _automatik_werte(DOCS)
+    assert werte["nk_abrechnung"] == 593.64
+    assert werte["schornsteinfeger"] == 26.26
+    assert werte["spenden"] == 0.0
+    assert werte["krankheit"] == 0.0
+    assert _automatik_werte([])["nk_abrechnung"] == 0.0
+    assert _automatik_werte(None)["schornsteinfeger"] == 0.0
+
+    docs_erweitert = DOCS + [
+        {"dateiname": "spende.pdf", "kategorie": "spende",
+         "betrag_eur": 150.0, "extrahierte_daten": {}},
+        {"dateiname": "arzt.pdf", "kategorie": "krankheitskosten",
+         "betrag_eur": 340.0, "extrahierte_daten": {}},
+        {"dateiname": "schornsteinfeger_rechnung.pdf",
+         "kategorie": "handwerker_haushaltsnah", "betrag_eur": 80.0,
+         "extrahierte_daten": {"arbeitskosten": 60.0}},
+    ]
+    werte2 = _automatik_werte(docs_erweitert)
+    assert werte2["spenden"] == 150.0
+    assert werte2["krankheit"] == 340.0
+    # Schornsteinfeger jetzt aus ZWEI Quellen (NK-Abrechnung + eigene
+    # Handwerkerrechnung) summiert:
+    assert werte2["schornsteinfeger"] == 26.26 + 60.0
+    print("✅ sparcheck._automatik_werte() summiert korrekt für alle "
+         "überlappenden Posten (NK, Handwerkerrechnung, Spende, "
+         "Krankheitskosten; inkl. leere/None-Docs-Liste)")
+
+
+def test_sparcheck_werbungskosten_belege_summe():
+    docs = [
+        {"kategorie": "werbungskosten", "inhaber": "P1", "betrag_eur": 200.0},
+        {"kategorie": "werbungskosten", "inhaber": "P1", "betrag_eur": 50.0},
+        {"kategorie": "werbungskosten", "inhaber": "P2", "betrag_eur": 999.0},
+        {"kategorie": "spende", "inhaber": "P1", "betrag_eur": 10.0},
+    ]
+    assert _werbungskosten_belege_summe(docs, "P1") == 250.0
+    assert _werbungskosten_belege_summe(docs, "P2") == 999.0
+    assert _werbungskosten_belege_summe([], "P1") == 0.0
+    print("✅ sparcheck._werbungskosten_belege_summe() summiert korrekt "
+         "je Person")
+
+
+def test_sparcheck_warnhinweis_zerstoert_satzzeichen_nicht():
+    """Regressionstest für einen Bug, der beim ersten Schreiben dieses
+    Features auftrat: .replace(',', 'X').replace('.', ',').replace('X', '.')
+    auf den GESAMTEN (verketteten) Hinweistext statt nur auf die
+    formatierte Zahl angewendet zerstört jedes Komma/jeden Punkt im Satz
+    (z. B. 'ZUSÄTZLICHE, davon' -> 'ZUSÄTZLICHE. davon')."""
+    nk_wert = 1234.5
+    nk_wert_str = (f"{nk_wert:,.2f} €".replace(",", "X")
+                  .replace(".", ",").replace("X", "."))
+    assert nk_wert_str == "1.234,50 €", nk_wert_str
+    satz = ("Häkchen hier nur setzen, wenn du ZUSÄTZLICHE, davon "
+           f"unabhängige Kosten von {nk_wert_str} eintragen willst.")
+    assert "ZUSÄTZLICHE, davon" in satz, \
+        "Satzkomma darf durch die Zahlenformatierung nicht verändert werden"
+    assert satz.count(nk_wert_str) == 1
+    print("✅ Zahlenformatierung im Doppelerfassungs-Hinweis lässt "
+         "Satzzeichen im Fließtext unangetastet")
+
+
 if __name__ == "__main__":
     test_checks_hinweise()
     test_summary_und_elster_hilfe()
     test_veranlagung_ermaessigung()
+    test_sparcheck_automatik_werte()
+    test_sparcheck_werbungskosten_belege_summe()
+    test_sparcheck_warnhinweis_zerstoert_satzzeichen_nicht()
     print("🎉 Alle Automatik-Tests bestanden.")

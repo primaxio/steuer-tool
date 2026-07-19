@@ -7,6 +7,7 @@ die relevanten Werte als strukturiertes JSON.
 import base64
 import json
 import re
+from datetime import datetime
 
 import anthropic
 
@@ -52,6 +53,9 @@ Kategoriespezifische Felder für "extrahierte_daten":
   rv_arbeitnehmer (Z. 23a), kv_beitraege (Z. 25), pv_beitraege (Z. 26),
   av_beitraege (Z. 27). Erkenne am Aussteller (BVA, Bundeswehr,
   Dienstleistungszentrum), ob es die Bundeswehr-Bescheinigung ist.
+- Übergangsbeihilfe: lohnsteuer, soli, kirchensteuer (falls auf der
+  Bescheinigung/Abrechnung einbehalten ausgewiesen, sonst null – NICHT
+  raten). Diese Beträge zählen wie normale Lohnsteuervorauszahlung.
 - Bank-Steuerbescheinigung: kapitalertraege_zeile7, kapitalertragsteuer, soli,
   kirchensteuer, in_anspruch_genommener_freistellungsauftrag,
   verlust_aktien, verlust_sonstige, auslaendische_quellensteuer.
@@ -75,6 +79,25 @@ Kategoriespezifische Felder für "extrahierte_daten":
   kap_zeile24_terminverluste (als positive Zahl), so_krypto_gewinn
   (Anlage SO Zeile 47/54, Kontrollwert), broker_name, quellensteuer.
 - Spenden: organisation, betrag, zuwendungsbestaetigung_vorhanden (bool).
+- Betriebseinnahme/-ausgabe (z. B. Gutschrift/Abrechnung eines
+  Energieversorgers für verkauften Strom/Wärme, Ausgangsrechnung,
+  Wartungsrechnung, Materialbeleg, Anschaffungsbeleg eines Nebengewerbes):
+  betrieb_zuordnung (Name/Art des Betriebs, falls aus dem Beleg erkennbar,
+  sonst null), netto, umsatzsteuer, brutto, leistungszeitraum (Zeitraum
+  oder Datum), menge_und_einheit (z. B. "1.234 kWh"), gegenpartei
+  (z. B. "Stadtwerke Bonn"). Bei Anschaffungen von Anlagegütern (Maschinen,
+  Geräte, technische Anlagen wie BHKW/PV): zusätzlich ist_anlagegut (bool,
+  true bei Wirtschaftsgütern > 800 € netto mit mehrjähriger Nutzung) und
+  geschaetzte_nutzungsdauer (Jahre, nach amtlicher AfA-Tabelle schätzen,
+  z. B. technische Anlagen 10 Jahre, Büroausstattung 13 Jahre, PC/Software
+  3 Jahre – bei Unsicherheit vorsichtig schätzen und rueckfrage stellen).
+  Rechnung = "betrieb_einnahme" nur, wenn der Nutzer der Rechnungssteller
+  ist (Ausgangsrechnung/Gutschrift AN ihn); Belege, die er selbst bezahlt
+  hat, sind "betrieb_ausgabe".
+- Rentenbezugsmitteilung (Deutsche Rentenversicherung, Rürup-Anbieter):
+  jahresbetrag_rente (Brutto-Jahresbetrag der Rente), rentenbeginn_jahr
+  (Jahr, in dem die Rente ERSTMALIG bezogen wurde – steht meist als
+  "Rentenbeginn" oder im Betreff, NICHT das Jahr der Mitteilung selbst!).
 
 Regel für "steuerjahr" (WICHTIG für die automatische Sortierung):
 - Maßgeblich ist das ZAHLUNGS-/Zuflussjahr (§ 11 EStG, Abflussprinzip),
@@ -101,6 +124,23 @@ def _build_system_prompt() -> str:
         for key, info in CATEGORIES.items()
     )
     return _SYSTEM_PROMPT.replace("{kategorien}", kat_lines)
+
+
+def _berechne_klaerungsbedarf(result: dict) -> bool:
+    """Klärungsbedarf: unsicher erkannt, 'sonstiges' oder steuerlich
+    relevante Angaben fehlen (Betrag/Datum unklar, offene Rückfrage, bei
+    Betriebsbelegen fehlende Betrieb-Zuordnung). Deterministisch in Python
+    berechnet statt vom Modell selbst behauptet – reproduzierbar testbar."""
+    fehlt_relevantes = (
+        result.get("betrag_eur") is None
+        or not result.get("datum")
+        or bool(result.get("rueckfragen"))
+        or (result.get("kategorie") in ("betrieb_einnahme", "betrieb_ausgabe")
+            and not result.get("extrahierte_daten", {}).get("betrieb_zuordnung"))
+    )
+    return (result.get("confidence", 0.0) < 0.7
+            or result.get("kategorie") == "sonstiges"
+            or fehlt_relevantes)
 
 
 def _content_block(file_bytes: bytes, mime: str) -> dict:
@@ -177,4 +217,12 @@ def analyze_document(
     result.setdefault("hinweise", [])
     result.setdefault("betrag_eur", None)
     result["dateiname"] = filename
+
+    result["klaerungsbedarf"] = _berechne_klaerungsbedarf(result)
+    result["zuordnungs_historie"] = [{
+        "zeitpunkt": datetime.now().isoformat(timespec="seconds"),
+        "aktion": "automatische Kategorisierung",
+        "von": None, "nach": result["kategorie"], "quelle": "automatisch",
+        "begruendung": f"Claude Vision, Confidence {result['confidence']:.0%}",
+    }]
     return result

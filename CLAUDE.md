@@ -22,6 +22,20 @@ Finanzamt (ERiC-Zertifizierung nötig) – bewusste Design-Entscheidung.
   29.02.→28.02.), aggregate() je Ehegatte (Freigrenze PRO PERSON),
   optimizer_hinweise(), § 32a-Tarif (est_nach_tarif, Splitting via
   2×Tarif(zvE/2)), steuer_auf_krypto() = Grenzbetrachtung.
+  run_fifo() verknüpft seit Ausbaustufe 7 automatisch transfer_out/
+  transfer_in-Paare zwischen EIGENEN Wallets desselben Inhabers/Assets
+  (`_match_wallet_transfers()`: unterschiedliches Depot, Empfang zeitnah
+  nach Versand, empfangene Menge ≤ versendete Menge wegen Netzwerk-
+  gebühr) und übernimmt Haltefrist + Kostenbasis der Ursprungs-Lots ins
+  Ziel-Depot (`_run_fifo_pass()` läuft dafür zweimal: 1. Durchlauf
+  ermittelt, welche Sub-Lots ein transfer_out konsumiert hat, 2.
+  Durchlauf injiziert diese Sub-Lots beim verknüpften transfer_in statt
+  einer frischen Anschaffung). Funktioniert über mehrere unterschiedlich
+  alte Lots hinweg (jedes Sub-Lot behält sein Originaldatum); bleibt bei
+  unterschiedlichen Inhabern bewusst UNverknüpft. Ohne Partner (kein
+  passender Eingang gefunden) bleibt es bei der alten, konservativen
+  Warnung. Test: `tests/test_crypto_fifo.py` (erste dedizierte
+  FIFO-Testdatei, deckt auch die Basis-FIFO-Logik ab).
 - `core/crypto_parsers.py` – parse_coinbase (Convert → verkauf+kauf via
   Notes-Regex), parse_etoro (Closed Positions, Leverage>1/Short = CFD →
   KAP-Hinweis, KEINE Übernahme in SO), parse_generic + Claude-Mapping
@@ -64,6 +78,34 @@ Finanzamt (ERiC-Zertifizierung nötig) – bewusste Design-Entscheidung.
 - `core/sparcheck.py` – ITEMS-Checkliste (~23 Posten, Buckets wk/sa/
   parteispenden/h35a_*/agb), render_sparcheck() = Tab 4, summen() liefert
   Topf-Summen; fließt in Rechner + ELSTER-Hilfe ("Zusätzliche Posten").
+  UX (Ausbaustufe 8, "überall soll stehen wenn was übernommen wurde"):
+  render_sparcheck() bekommt zusätzlich `docs`, um Doppelerfassung
+  DIREKT am Eingabefeld sichtbar zu machen (nicht erst als Fehler in
+  Tab 4) – `_AUTOMATIK_UEBERLAPPT`/`_automatik_werte()` sind generisch
+  für ALLE überlappenden Posten (nicht nur NK-Abrechnung): je Posten
+  eine Liste (Kategorie, Feld)-Paare, deren Beträge summiert werden
+  (`nk_abrechnung` ← nebenkostenabrechnung.summe_haushaltsnah;
+  `schornsteinfeger` ← nebenkostenabrechnung.summe_handwerker UND
+  handwerker_haushaltsnah.arbeitskosten, da veranlagung.py beide in
+  denselben § 35a-Handwerker-Topf summiert; `spenden` ← spende;
+  `krankheit` ← krankheitskosten). Werbungskosten sind NICHT auf
+  einzelne Posten herunterbrechbar (eine Kategorie für Arbeitsmittel/
+  Fortbildung/etc.) → eigener gruppenweiter Hinweis je Person
+  (`_werbungskosten_belege_summe()`) statt Posten-Hinweis. Noch nicht
+  angehakt → `st.info` mit dem bereits automatisch übernommenen Betrag;
+  angehakt → `st.warning` ("Doppelerfassung-Risiko"). Dasselbe Muster
+  auch in `crypto_ui.py::render_crypto_tab()` (jetzt mit `docs`-Param)
+  für die Termingeschäfte-Felder vs. hochgeladene broker_steuerbericht-
+  Dokumente. Zusätzlich in sparcheck.py: laufende Zwischensumme je
+  Gruppen-Überschrift (sichtbar auch bei eingeklapptem Expander) und
+  eine `st.metric()`-Kachelreihe statt Fließtext am Ende.
+  WICHTIG: Beim Bauen von Hinweistexten aus mehreren String-Literalen
+  NIE `.replace(",", "X").replace(".", ",").replace("X", ".")` an die
+  verkettete Literalkette hängen – das zerstört Satzzeichen im
+  Fließtext (Python verkettet adjazente String-Literale VOR jedem
+  `.replace()`-Aufruf). Zahl zuerst separat formatieren (siehe
+  sparcheck._eur()), dann per f-string in den Satz einsetzen (Test dazu
+  in `test_automatik.py`).
 - `core/veranlagung.py` – berechne_veranlagung(): Brutto → WK (max mit
   Pauschbetrag) → +Krypto → −Vorsorge (LSB Z. 23–26, Fallback 19 % mit
   Warnung) → −SA (inkl. gezahlter KiSt!) → −agB über zumutbarer Grenze →
@@ -73,23 +115,38 @@ Finanzamt (ERiC-Zertifizierung nötig) – bewusste Design-Entscheidung.
 - Fristen: cfg["abgabefrist_datum"] (ISO) – 2024: 2025-07-31, 2025:
   2026-07-31; checks.py warnt <45 Tage, Fehler bei Überschreitung
   (Verspätungszuschlag-Hinweis). Tab 5 zeigt Countdown-Metric.
-- Tab-Reihenfolge: Dokumente · Krypto · Fragebogen · Spar-Check ·
-  Ergebnis&ELSTER · Verstehen.
+- Tab-Reihenfolge (Stand Ausbaustufe 6): Dokumente · Krypto · Betrieb ·
+  Fragebogen · Spar-Check · Ergebnis&ELSTER · Verstehen.
 
 ## Einfacher Modus (geführter Wizard)
-- `core/wizard.py` – render_wizard(): lineare 5-Schritte-Führung (Start ·
-  Belege · Fragen · Ergebnis · Fertig) für Steuer-Laien, die sich in der
-  Tab-Ansicht überfordert fühlen. Sidebar-Radio "Wie möchtest du arbeiten?"
-  schaltet zwischen Einfach (Wizard) und Experte (alle 6 Tabs) um; im
-  Einfach-Modus rendert app.py NUR den Wizard (st.stop() vor den Tabs).
-  State: st.session_state.wizard_step (Index 0–4).
+- `core/wizard.py` – render_wizard(): lineare **9-Schritte**-Führung
+  (Start · Belege · Grunddaten · Fahrtkosten & Homeoffice · Kapitalerträge
+  & Krypto · Weitere Vorteile · Stammdaten · Ergebnis · Fertig) für
+  Steuer-Laien, die sich in der Tab-Ansicht überfordert fühlen.
+  Sidebar-Radio "Wie möchtest du arbeiten?" schaltet zwischen Einfach
+  (Wizard) und Experte (alle 7 Tabs) um; im Einfach-Modus rendert app.py
+  NUR den Wizard (st.stop() vor den Tabs). State:
+  st.session_state.wizard_step (Index 0–8).
+- Ausbaustufe 8 ("Schritt für Schritt, nicht nur die Hauptpunkte"): der
+  Wizard deckt inzwischen ALLE Fragebogen-Themen ab, die vorher nur im
+  Experten-Modus verfügbar waren (Fahrtkosten, Homeoffice, Stammdaten,
+  Verlustvorträge, Behinderung/Pflege/Unterhalt, Riester) – jeweils als
+  eigener Schritt bzw. hinter einer Ja/Nein-Weiche versteckt (Schritt
+  "Weitere Vorteile"), damit wer nicht betroffen ist, einfach mit "Nein"
+  weiterklickt, statt alle Felder auf einmal zu sehen. NUR "Betrieb"
+  bleibt bewusst Experten-Modus-only (zu komplex für eine Wizard-Frage;
+  der Wizard fragt aber danach und verweist aktiv dorthin).
+- `core/fragebogen_ui.py` (NEU, Ausbaustufe 8) – gemeinsame Render-
+  Bausteine (render_stammdaten, render_fahrtkosten_homeoffice,
+  render_behinderung_pflege_unterhalt, render_riester,
+  render_verlustvortraege + hat_*()-Prädikate für die Ja/Nein-Weichen),
+  von app.py (Experten-Tab "Fragebogen & Prüfung") UND wizard.py
+  gemeinsam genutzt (Muster wie dokumente_ui.py) – KEINE Duplikate.
+  `key_prefix`-Parameter verhindert Widget-Key-Kollisionen zwischen den
+  beiden Aufrufstellen.
 - Wizard nutzt dieselben Kernfunktionen wie die Tabs (run_checks,
   berechne_veranlagung, build_summary, render_crypto_tab) – KEINE eigene
-  Business-Logik, nur reduzierte Feldauswahl (4 Ja/Nein-Fragen statt
-  Stammdaten/Verlustvorträge/Fahrtkosten – diese bleiben im Experten-Modus).
-  Krypto-Erfassung erscheint als eingebetteter Expander in Schritt "Fragen",
-  wenn "Krypto verkauft?" mit Ja beantwortet wird (kein eigener Wizard-Schritt,
-  damit die Schrittzahl konstant bleibt).
+  Business-Logik.
 - `core/dokumente_ui.py` – render_dokumente_tab(): Beleg-Upload/-Analyse/
   -Korrektur aus dem alten Tab 1 extrahiert, damit Experten-Tab und
   Wizard-Schritt "Belege" dieselbe Logik nutzen (keine Duplikate).
@@ -110,6 +167,14 @@ Finanzamt (ERiC-Zertifizierung nötig) – bewusste Design-Entscheidung.
   Jahr je Beleg editierbar); Sidebar zeigt Zählung je Jahr.
   Jahreswechsel = Sidebar-Dropdown; Krypto filtert ohnehin je
   Verkaufsjahr in aggregate().
+- Belegablage-Persistenz (Ausbaustufe 7): `dokumente_ui.py` speichert die
+  Original-Datei beim Upload als Base64 in `doc["_bytes"]`
+  (+ `doc["_mime"]`) – überlebt Speichern/Laden des Projektstands
+  (persist.py brauchte keine Änderung, docs sind bereits reine Dicts)
+  und ist im Tab 1 per Download-Button wieder abrufbar. `_bytes` wird
+  bewusst aus `export_json()` und dem Klärungs-Chat-Kontext
+  herausgefiltert (Größe/Redundanz) – vorher gingen Originaldateien nach
+  der Analyse komplett verloren, nur Metadaten blieben.
 
 ## Ausbaustufe 5 – "Blockpit-Style" (⚠️ LIVE UNGETESTET)
 - `core/connectors/preise.py` – PreisDienst: CoinGecko-Tageskurse EUR,
@@ -181,14 +246,200 @@ Finanzamt (ERiC-Zertifizierung nötig) – bewusste Design-Entscheidung.
 - Für exakte Ergebnisse EZB-TAGESkurse laden (eurofxref-hist.csv);
   Monatsdurchschnitte erzeugen wenige % Abweichung.
 
+## Code- und Steuer-Audit-Prozess
+- `AUDIT.md` – lebendes Dokument (nicht nur einmalig): technischer +
+  steuerfachlicher Review, priorisiert kritisch/mittel/gering. Kritische
+  Funde werden direkt behoben (mit Regressionstest), mittlere/geringe
+  Funde bleiben als Vorschlagsliste bis zur expliziten Freigabe.
+- Erste Runde (07/2026) behoben: KeyError-Crash-Risiko bei fehlendem
+  "extrahierte_daten"-Key (checks.py, IMMER `.get("extrahierte_daten", {})`
+  verwenden, NIE `d["extrahierte_daten"]`), krypto_report-Dokumente ohne
+  FIFO-Engine fehlten in der Steuerschätzung (jetzt Fallback mit
+  Doppelzählungs-Schutz), Übergangsbeihilfe floss nirgends in Rechnung/
+  Export ein.
+- Zweite Runde (07/2026, nach expliziter Freigabe "alles aufräumen und
+  fixen") – alle A.2/A.3-Funde aus AUDIT.md umgesetzt:
+  - M1: Verlustvortrag § 23/KAP wirkt jetzt WIRKLICH mindernd (vorher nur
+    Anzeige) – `interview["verlustvortrag_23"]` mindert Krypto-Gewinn vor
+    Freigrenzenprüfung, `verlustvortrag_kap_*` mindert die KAP-
+    Bemessungsgrundlage (Schritt 10/10b in veranlagung.py).
+  - M2: Vorsorgeaufwand-Höchstbetrag (§ 10 Abs. 4 EStG, 1.900 €/Person
+    Arbeitnehmer) jetzt real berechnet statt pauschal 19 % geschätzt –
+    `cfg["vorsorge_hoechstbetrag_arbeitnehmer"/"_selbststaendig"]`,
+    sonstige Vorsorgeaufwendungen (private Zusatzversicherungen) wirken
+    nur noch bis zum Deckel zusätzlich zu RV/KV/PV.
+  - M4: eToro-Parser parst vorzeichenbehaftete Beträge mit
+    Tausendertrennzeichen korrekt (`_clean_num_signed()` statt der alten
+    `.replace()`-Kette, die bei negativen Werten crashte/falsch rundete).
+  - M8: Übergangsbeihilfe fließt jetzt mit eigenem Lohnsteuerabzug
+    (lohnsteuer/soli/kirchensteuer aus vision.py-Extraktion) in die
+    Rechnung UND wird automatisch gegen die Fünftelregelung geprüft
+    (siehe unten) statt nur als Hinweistext.
+  - Fünftelregelung § 34 Abs. 1, Abs. 2 Nr. 4 EStG: NEUES eigenständiges,
+    separat getestetes Modul `core/fuenftelregelung.py`
+    (`fuenftelregelung()`), rechnet die Vergleichsrechnung (normale
+    Besteuerung vs. Fünftel-Methode) für außerordentliche Einkünfte
+    (aktuell: Übergangsbeihilfe) automatisch durch und wählt die
+    günstigere Variante – kein reiner Hinweistext mehr.
+  - Günstigerprüfung KAP (§ 32d Abs. 6 EStG): veranlagung.py Schritt 10b
+    vergleicht jetzt den tatsächlichen Grenzsteuersatz mit der 25 %
+    Abgeltungsteuer und wendet automatisch den günstigeren an, inkl.
+    Rechenweg-Ausweis der Ersparnis – vorher nur ein Hinweis ohne
+    Berechnung.
+  - Abgabefrist-Hinweistext 2025 korrigiert (30.04.2027 → 01.03.2027,
+    da mit Steuerberater).
+  - Kleinere technische Aufräumarbeiten: `jahr_zuordnung.ist_im_jahr()`
+    als gemeinsames Prädikat (vorher doppelte Mengen-Logik in
+    dokumente_ui.py), PDF-Report-Dateiname kollisionssicher
+    (uuid-Suffix), `ruff`-Lint-Setup (siehe unten).
+- Ruff-Lint-Setup: `pyproject.toml` mit `[tool.ruff.lint] select = ["F"]`
+  – bewusst NUR Pyflakes (unbenutzte Imports, undefinierte Namen,
+  Doppel-Definitionen), keine Stilregeln (E7xx/E4xx), um keinen
+  großflächigen Reformatierungs-Diff zu erzwingen. `ruff check .` vor
+  größeren Änderungen laufen lassen.
+- Pausch-/Freibeträge werden bei Gelegenheit gegen aktuelle BMF-/
+  Fachportal-Quellen gegengeprüft (WebSearch), nicht nur aus dem
+  Trainingswissen übernommen – Abweichungen landen in AUDIT.md.
+- Dritte Runde (07/2026, nach expliziter Freigabe "Alles machen und
+  nochmal im Loop auf Fehler testen und gegenkorrigieren") – alle
+  B.1-"Niedrig"-Punkte + restliche Backlog-Ideen umgesetzt, siehe
+  eigener Abschnitt "Zusatz-Anlagen" unten sowie AUDIT.md
+  "Status-Update 2" für die vollständige Liste inkl. der bewusst NICHT
+  umgesetzten Punkte (Bilanzierung, USt-Voranmeldung, eToro-Optimizer,
+  Connector-Live-Test – jeweils mit Begründung, warum das kein
+  Implementierungsdefizit ist).
+
+## Zusatz-Anlagen (agB, § 33b/33a, AV, R) – Ausbaustufe 7
+- `core/veranlagung.py::_zumutbare_belastung()` – echte dreistufige
+  Berechnung der zumutbaren Belastung (§ 33 Abs. 3 EStG, BFH
+  VI R 75/14) statt des alten pauschalen 4-%/6-%-Näherungswerts;
+  Sätze/Stufengrenzen aus `cfg["zumutbare_belastung_saetze"/"_stufen"]`,
+  abhängig von Familienstand UND `interview["kinder_anzahl"]`
+  (Fragebogen-Feld neben "Kinder?").
+- `core/veranlagung.py::_behinderten_pflege_unterhalt()` – Behinderten-
+  Pauschbetrag (§ 33b Abs. 3 EStG, GdB-Tabelle 20–100 + erhöhter
+  Pauschbetrag 7.400 € bei Merkzeichen H/Bl/TBl aus
+  `interview["gdb_{P}"/"gdb_hilflos_blind_{P}"]`), Pflege-Pauschbetrag
+  (§ 33b Abs. 6, Pflegegrad 2–5 aus `interview["pflegegrad_angehoeriger"]`)
+  und § 33a-Unterhalt (Höchstbetrag = `cfg["grundfreibetrag"]`, gekürzt
+  um eigene Einkünfte/Bezüge des Empfängers über 624 € anrechnungsfrei).
+  WICHTIG: Diese drei wirken OHNE Kürzung um die zumutbare Belastung
+  (anders als Krankheitskosten) – deshalb ein eigener Rechenschritt
+  direkt vom Gesamtbetrag der Einkünfte, nicht Teil des agB-Buckets im
+  Spar-Check. Fragebogen-UI: Expander "🦽 Behinderung, Pflege &
+  Unterhalt" in app.py.
+- Riester (Anlage AV, § 10a EStG): eigener Fragebogen-Expander
+  "💰 Riester-Rente" (`riester_beitrag_{P}`, `riester_kinder_ab_2008`/
+  `_vor_2008`). veranlagung.py Schritt 6b rechnet die echte
+  Günstigerprüfung (Steuerersparnis durch vollen Sonderausgabenabzug
+  vs. Grundzulage 175 €/Person + Kinderzulage 300 €/185 € je nach
+  Geburtsjahrgang) und bucht nur den ÜBERSTEIGENDEN Betrag zusätzlich
+  – bleibt es sonst bei der Zulage (kein Bescheid-Effekt). Ersetzt das
+  alte, undifferenzierte "Riester-/Rürup"-Sammelfeld im Spar-Check.
+- Rürup/Basisrente: eigenes Spar-Check-Item `ruerup_basisrente`
+  (Bucket `vorsorge_basis`, NICHT `sa`) – fließt seit 2023 zu 100 % ohne
+  1.900-€-Deckel in die Basis-Vorsorgeaufwendungen (wie die gesetzliche
+  RV), vorher fälschlich wie eine gedeckelte "sonstige
+  Vorsorgeaufwendung" behandelt.
+- Anlage R (Renten, § 22 Nr. 1 EStG): neue Kategorie
+  "rentenbezugsmitteilung" (vision.py extrahiert `jahresbetrag_rente`,
+  `rentenbeginn_jahr`) + `core/rente.py::rentenanteil_steuerpflichtig()`.
+  Besteuerungsanteil ist ein FESTER Prozentsatz je nach Rentenbeginn-
+  KOHORTE (nicht abhängig vom aktuellen Steuerjahr!) –
+  `cfg["renten_besteuerungsanteil"]` deckt 1990–2058 ab (2005: 50 %,
+  seit 2023 nur noch +0,5 Punkte/Jahr statt +1 wegen
+  Wachstumschancengesetz 2024, 100 % erst 2058 statt 2040). Fehlt das
+  Rentenbeginn-Jahr auf dem Beleg, wird KONSERVATIV 100 % angesetzt
+  (keine Steuer-Unterschätzung) – Regressionstest deckt genau diesen
+  Fallback ab (ein früher Implementierungsfehler landete hier
+  fälschlich bei 50 % statt 100 %, wurde vor dem Commit gefunden und
+  gefixt). Deckt bewusst NUR den Regelfall ab (gesetzliche RV/Rürup),
+  NICHT die abweichende Ertragsanteil-Tabelle für sofortbeginnende
+  private Leibrenten gegen Einmalbeitrag (Sonderfall ohne bekannten
+  Anwendungsfall im Nutzerprofil).
+- Anlage V (Vermietung) war strukturell schon vorhanden
+  (`betrieb.py` unterstützt `art="vermietung"` mit korrektem
+  Anlage-V-Label) – ergänzt um einen Hinweis zu den GEBÄUDE-AfA-Sätzen
+  (§ 7 Abs. 4 EStG: 2 %/2,5 %/3 % je nach Baujahr des Gebäudes, NICHT
+  frei wählbar wie bei sonstigen Anlagegütern, Grund-und-Boden-Anteil
+  nicht abschreibbar).
+- Alle Beträge/Tabellen aus `cfg` (tax_config.py), keine hartkodierten
+  Steuerkonstanten – Test `tests/test_neue_anlagen.py`.
+
+## Betriebsmodul (EÜR, Anlage G/S) – Ausbaustufe 6
+- `core/betrieb.py` – Datenmodell Betrieb/Position/AfaPosition (dataclasses,
+  Daten als ISO-Strings statt datetime → persist.py braucht keine
+  Sonderbehandlung). berechne_euer(betrieb, jahr, cfg): Einnahmen −
+  Ausgaben − AfA = Gewinn. AfaPosition.afa_fuer_jahr(): lineare AfA,
+  zeitanteilig nach VOLLEN MONATEN im Anschaffungsjahr (§ 7 Abs. 1 EStG) –
+  über monatliche_afa × Monate-im-Jahr, nicht grob pro-rata übers Jahr.
+- Steuerliche Sonderregeln als Hinweise (NIE hart kodiert, alle
+  Schwellwerte aus cfg): § 3 Nr. 72 EStG PV-Steuerbefreiung bis 30 kWp
+  GILT NUR FÜR STROM, nicht für Wärme (Fernwärme/BHKW bleibt gewerblich –
+  Namens-Heuristik warnt, wenn "wärme"/"bhkw" im Betriebsnamen steht trotz
+  art≠photovoltaik). § 19 UStG Kleinunternehmer-Umsatzgrenzen sind
+  JAHRESABHÄNGIG (2024: 22.000 €/50.000 €, ab 2025: 25.000 €/100.000 € –
+  JStG 2024) → cfg["kleinunternehmer_grenze_vorjahr"/"_laufend"].
+  § 11 GewStG Gewerbesteuer-Freibetrag 24.500 € NUR bei art=="gewerblich"
+  (Freiberufler zahlen keine Gewerbesteuer).
+- Kategorien "betrieb_einnahme"/"betrieb_ausgabe": Vision extrahiert
+  betrieb_zuordnung, netto/umsatzsteuer/brutto, menge_und_einheit,
+  gegenpartei, bei Anschaffungen ist_anlagegut + geschaetzte_nutzungsdauer.
+  Anlagegüter werden NICHT automatisch als AfA übernommen (steuerlich zu
+  wichtig für Stillschweigen) – Tab 🏭 Betrieb zeigt sie als Vorschlag mit
+  Bestätigungs-Button (core/betrieb_ui.py::_anlagegut_vorschlaege).
+- `core/betrieb_ui.py` – Tab "🏭 3 · Betrieb": Betriebe anlegen, EÜR-
+  Übersicht, Einnahmen-/Ausgaben-/AfA-Tabellen (aus Belegen via
+  _sync_docs_in_betrieb() automatisch befüllt, dedupliziert über
+  Positon.quelle=Dateiname, + manuelle st.form-Eingabe). Ergebnis landet
+  in interview["_betriebe"] (gewinn_pro_person je P1/P2) – analog zum
+  Krypto-Modul-Pattern (interview["_crypto"]), von veranlagung.py/
+  elster_export.py/checks.py gelesen, OHNE core.betrieb direkt zu
+  importieren (lose Kopplung).
+- Fragebogen "hat_betrieb_{P}" je Person (Tab Fragebogen); Gewinn fließt
+  als eigene Einkunftsart (Schritt "1b") in berechne_veranlagung ein;
+  eigener Export-Block "Anlage G / Anlage EÜR" in elster_export.py
+  (Anlage-Label je nach art: G/S/V); checks.py warnt bei Betrieb ohne
+  Belege, unbestätigten Anlagegut-Belegen und promotet "⚠️"-Hinweise aus
+  betrieb.py (Umsatzgrenzen etc.) zu zentralen Findings.
+
+## Chat-Dokumenten-Triage & Zuordnungs-Historie
+- `core/vision.py::_berechne_klaerungsbedarf()` – deterministisch in
+  Python (NICHT vom Modell behauptet, daher reproduzierbar testbar):
+  true bei confidence<0.7, Kategorie "sonstiges" ODER fehlenden
+  steuerlich relevanten Angaben (Betrag/Datum fehlt, offene Rückfrage,
+  bei Betriebsbelegen fehlende betrieb_zuordnung).
+- `core/erklaerungen.py::klaerungs_chat()` – Steuerberater-Chat für EIN
+  konkretes unklares Dokument, Kontext = extrahierte Daten + Kategorien
+  aus categories.py + Personen + Betriebe. Antwortet strukturiert
+  {"antwort", "vorschlag": {...}, "sicher": bool} – "sicher" erst true
+  bei konkreter, begründeter Zuordnung ohne offene Rückfrage.
+- `core/dokumente_ui.py` – Bereich "❓ Klärung nötig (N)" oben in Tab 1,
+  Mini-Chat pro Dokument (eigener Verlauf in
+  session_state[f"klaerchat_{dateiname}"]). Bei "sicher": true → Button
+  "✅ Zuordnung übernehmen" (_uebernehme_chat_vorschlag()) setzt
+  Kategorie/Inhaber/Betrieb/Steuerjahr/Betrag, klaerungsbedarf=False,
+  protokolliert in doc["hinweise"] UND doc["zuordnungs_historie"].
+- Jedes Dokument führt "zuordnungs_historie" (Liste von
+  {zeitpunkt, aktion, von, nach, quelle: automatisch|chat|manuell,
+  begruendung}) – initialer Eintrag von analyze_document(), weitere bei
+  manueller Korrektur (Tab-1-Selectbox) und Chat-Übernahme
+  (_historie_eintrag()-Helper, ein Aufruf pro Änderungsereignis).
+- elster_export.py rendert einen Anhang "Herkunft der Werte" – NUR für
+  Dokumente mit mehr als dem initialen Automatik-Eintrag (sonst wäre der
+  Anhang bei jedem einzelnen Beleg redundant).
+- persist.py brauchte KEINE Änderung: Dokumente sind bereits reine Dicts,
+  zuordnungs_historie wird als weiterer Key transparent mitgespeichert/
+  -geladen (durch tests/test_klaerung.py abgesichert).
+
 ## Architektur
-- `app.py` – Streamlit-UI, 3 Tabs (Dokumente / Fragebogen & Prüfung /
-  ELSTER-Hilfe & Export). State in st.session_state: docs, interview,
-  analyzed_files.
+- `app.py` – Streamlit-UI, 7 Tabs (Dokumente / Krypto / Betrieb /
+  Fragebogen & Prüfung / Spar-Check / Ergebnis & ELSTER / Verstehen).
+  State in st.session_state: docs, interview, analyzed_files, betriebe.
 - `core/tax_config.py` – Pauschbeträge pro Jahr (TAX_YEARS-Dict).
   Neues Jahr = Block kopieren + BMF-Werte eintragen. Fallback auf
   nächstliegendes Jahr mit Warnung (_geprueft=False).
-- `core/categories.py` – 11 Dokumentkategorien → Anlagen-Mapping.
+- `core/categories.py` – 16 Dokumentkategorien → Anlagen-Mapping.
 - `core/vision.py` – Anthropic-API-Call (PDF als document-Block, Bilder
   als image-Block, base64). System-Prompt erzwingt striktes JSON.
   Modell: claude-sonnet-4-6 (konfigurierbar in tax_config.VISION_MODEL).
@@ -197,6 +448,12 @@ Finanzamt (ERiC-Zertifizierung nötig) – bewusste Design-Entscheidung.
   (0,30 €/km bis 20 km, 0,38 € ab km 21).
 - `core/elster_export.py` – build_summary() aggregiert pro Anlage,
   render_elster_help() erzeugt Markdown, export_json() Rohdaten.
+- `core/fuenftelregelung.py` – fuenftelregelung(): Vergleichsrechnung
+  § 34 Abs. 1/Abs. 2 Nr. 4 EStG für außerordentliche Einkünfte, von
+  veranlagung.py aufgerufen, eigenständig getestet.
+- `core/rente.py` – rentenanteil_steuerpflichtig(): Besteuerungsanteil
+  der gesetzlichen Rente nach Rentenbeginn-Kohorte (§ 22 Nr. 1 EStG),
+  von veranlagung.py und elster_export.py aufgerufen.
 
 ## Konventionen
 - Sprache: Code-Kommentare, UI und Prompts auf Deutsch.
@@ -217,25 +474,60 @@ streamlit run app.py
 ```
 
 ## Tests
-Kein Test-Framework eingerichtet. Schneller Smoketest ohne API:
-Mock-Doc-Dicts an run_checks() und build_summary() übergeben
-(Beispiel-Struktur siehe docs-Format in app.py / vision.py-Rückgabe).
-Bei Änderungen an checks.py oder elster_export.py: Smoketest laufen
-lassen, bevor die App gestartet wird. Sinnvoller nächster Schritt:
-pytest mit Fixtures für die Mock-Dokumente.
+Kein pytest-Framework, aber ein `tests/`-Ordner mit eigenständig
+lauffähigen Smoketests (jeweils `python tests/test_X.py`, reine
+assert-Skripte ohne API-Zugriff – Mock-Doc-Dicts direkt an run_checks()/
+build_summary()/berechne_veranlagung() übergeben):
+- `test_doppelerfassung.py` – Doppelerfassungs-Wächter (Scan vs. Spar-Check)
+- `test_automatik.py` – NK-Abrechnung/Broker-Steuerbericht-Automatik
+- `test_audit_fixes.py` – Regressionen aus dem ersten Audit (KeyError-Fix,
+  krypto_report-Fallback, Übergangsbeihilfe)
+- `test_betrieb.py` – EÜR/AfA-Berechnung, Integration in Rechner + Export
+- `test_klaerung.py` – Chat-Triage-Übernahme, Zuordnungs-Historie,
+  persist.py-Rundreise
+- `test_audit_nachbesserungen.py` – Regressionen der zweiten Audit-Runde
+  (M2 Vorsorge-Höchstbetrag, M4 eToro-Vorzeichen-Parsing u. a.)
+- `test_fuenftelregelung.py` – eigenständiges Modul-Test für
+  `core/fuenftelregelung.py` (u. a. mathematischer Neutralitätsbeweis in
+  der linearen Tarifzone, nie schlechter als Normalbesteuerung)
+- `test_neue_anlagen.py` – agB Zumutbare Belastung (§ 33 EStG),
+  Behinderten-/Pflege-Pauschbetrag + § 33a, Anlage AV (Riester-
+  Günstigerprüfung), Anlage R (Renten-Kohortentabelle), Rürup/
+  Basisrente, categories.py↔erklaerungen.py-Sync
+- `test_belegablage.py` – Beleg-Bytes überleben persist.py-Rundreise,
+  werden aber aus JSON-Export und Chat-Kontext herausgefiltert
+- `test_crypto_fifo.py` – Basis-FIFO-Logik (bisher ungetestet!) plus
+  Wallet-Transfer-Haltefrist-Verknüpfung (verknüpft/unverknüpft,
+  mehrere Lots, Netzwerkgebühr, unterschiedliche Inhaber)
+Bei Änderungen an checks.py/veranlagung.py/elster_export.py: alle
+Testdateien laufen lassen, bevor die App gestartet wird (`for f in
+tests/test_*.py; do python "$f"; done`). Zusätzlich `ruff check .` für
+den Pyflakes-Lint-Durchlauf (unbenutzte Imports/undefinierte Namen).
 
 ## Bekannte Grenzen / Backlog-Ideen
-- Krypto: Transfers zwischen eigenen Wallets übernehmen Haltefrist nicht
-  automatisch (Warnung wird ausgegeben) → Lot-Verknüpfung wäre Ausbau
-- eToro liefert keine offenen Positionen → Optimizer dort unvollständig
+- eToro liefert keine offenen Positionen (keine Retail-API) → Optimizer
+  dort strukturell unvollständig, kein Implementierungsdefizit
 - Echte Export-Dateien der Börsen noch nicht getestet (nur synthetische) –
   ERSTER SCHRITT in Claude Code: echte eToro/Coinbase-Exporte durchlaufen
   lassen und Parser nachschärfen
 - Extraktionsqualität bei schlechten Fotos → ggf. Retry mit Hinweis-Prompt
-- Übergangsbeihilfe (Einmalzahlung): Fünftelregelung nur als Hinweis,
-  keine Berechnung
-- Zumutbare Belastung (agB) wird nicht berechnet, nur erwähnt
-- Belegablage: analysierte Dateien werden nicht gespeichert, nur Metadaten
+- Betriebsmodul: nur EÜR (§ 4 Abs. 3 EStG), keine Bilanzierung (§ 4
+  Abs. 1/§ 5 EStG – fundamental anderes Rechnungslegungssystem, für das
+  Nebengewerbe-Profil dieses Tools irrelevant); keine
+  Umsatzsteuer-Voranmeldung (eigenes, von der Einkommensteuer
+  unabhängiges Verfahren, nur für regelbesteuerte Unternehmer, die das
+  Tool ohnehin zum Steuerberater schickt)
+- Ausbaustufe-5-Connectors (Coinbase-API, Base-Chain) weiterhin
+  ⚠️ LIVE UNGETESTET – kann ohne echten, live gültigen API-Key nicht
+  verifiziert werden, siehe Abschnitt oben
+- Anlage AV/R (Riester/Rente): deckt den Regelfall ab (gesetzliche RV,
+  Standard-Riester-Zulage), NICHT Sonderfälle wie die altersabhängige
+  Ertragsanteil-Tabelle für sofortbeginnende private Leibrenten gegen
+  Einmalbeitrag
+- Anlage AV/R (Renten/Behinderung/Unterhalt/§ 33): fachlich vollständig
+  in `core/` und getestet, aber nicht im engeren Nutzerprofil (siehe
+  oben) – als generische Erweiterung für andere Nutzer/spätere
+  Lebensphasen gebaut
 
 ## Wichtig
 Steuerrechtliche Konstanten NIE hart in Logik schreiben – immer über

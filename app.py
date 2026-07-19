@@ -7,9 +7,13 @@ import os
 
 import streamlit as st
 
+from core.betrieb_ui import render_betrieb_tab
 from core.checks import run_checks
 from core.dokumente_ui import render_dokumente_tab
 from core.elster_export import build_summary, export_json, render_elster_help
+from core.fragebogen_ui import (render_behinderung_pflege_unterhalt,
+                                render_fahrtkosten_homeoffice, render_riester,
+                                render_stammdaten, render_verlustvortraege)
 from core.tax_config import DEFAULT_YEAR, TAX_YEARS, VISION_MODEL, get_config
 from core.crypto_ui import render_crypto_tab, _st_init
 from core.erklaerungen import GLOSSAR, STEUER_101, frag_steuerberater
@@ -158,17 +162,22 @@ if einfacher_modus:
                  erklaermodus)
     st.stop()
 
-tab_docs, tab_crypto, tab_check, tab_spar, tab_elster, tab_basics = st.tabs(
-    ["📄 1 · Dokumente", "₿ 2 · Krypto", "❓ 3 · Fragebogen & Prüfung",
-     "💰 4 · Spar-Check", "🧮 5 · Ergebnis & ELSTER",
-     "📖 6 · Verstehen & Fragen"])
+(tab_docs, tab_crypto, tab_betrieb, tab_check, tab_spar, tab_elster,
+ tab_basics) = st.tabs(
+    ["📄 1 · Dokumente", "₿ 2 · Krypto", "🏭 3 · Betrieb",
+     "❓ 4 · Fragebogen & Prüfung", "💰 5 · Spar-Check",
+     "🧮 6 · Ergebnis & ELSTER", "📖 7 · Verstehen & Fragen"])
 
 with tab_spar:
-    render_sparcheck(st.session_state.interview, personen)
+    render_sparcheck(st.session_state.interview, personen,
+                     st.session_state.docs)
 
 with tab_crypto:
     render_crypto_tab(cfg, api_key, model, st.session_state.interview,
-                      personen)
+                      personen, st.session_state.docs)
+
+with tab_betrieb:
+    render_betrieb_tab(cfg, st.session_state.interview, personen)
 
 # ---------------------------------------------------------------- Tab 1
 with tab_docs:
@@ -182,44 +191,10 @@ with tab_check:
 
     with st.expander("🪪 Stammdaten (für ELSTER-Hauptvordruck)",
                      expanded=not iv.get("stammdaten")):
-        sd = iv.setdefault("stammdaten", {})
-        c1, c2 = st.columns(2)
-        with c1:
-            sd["finanzamt"] = st.text_input(
-                "Finanzamt", sd.get("finanzamt", "Finanzamt Bonn-Innenstadt"))
-            sd["steuernummer"] = st.text_input(
-                "Gemeinsame Steuernummer (Format NRW: 5FF/BBB/UUUUP)",
-                sd.get("steuernummer", ""))
-            sd["iban"] = st.text_input("IBAN für Erstattung",
-                                       sd.get("iban", ""))
-        with c2:
-            for p_key in aktive:
-                sd[f"steuer_id_{p_key}"] = st.text_input(
-                    f"Steuer-ID {personen[p_key]} (11-stellig)",
-                    sd.get(f"steuer_id_{p_key}", ""), key=f"sid_{p_key}")
-                sd[f"religion_{p_key}"] = st.selectbox(
-                    f"Religion {personen[p_key]}",
-                    ["keine/andere (VD)", "ev", "rk"],
-                    ["keine/andere (VD)", "ev", "rk"].index(
-                        sd.get(f"religion_{p_key}", "keine/andere (VD)")),
-                    key=f"rel_{p_key}")
+        render_stammdaten(iv, personen, aktive)
 
     st.subheader("Fragebogen – Wege zur Arbeit (je Person)")
-    cols = st.columns(len(aktive))
-    for col, p_key in zip(cols, aktive):
-        with col:
-            st.markdown(f"**{personen[p_key]}**")
-            iv[f"entfernung_km_{p_key}"] = st.number_input(
-                "Einfache Entfernung (km)", 0.0, 300.0,
-                float(iv.get(f"entfernung_km_{p_key}") or 0.0), step=1.0,
-                key=f"km_{p_key}")
-            iv[f"arbeitstage_{p_key}"] = st.number_input(
-                "Tage mit Fahrt zur Arbeit", 0, 366,
-                int(iv.get(f"arbeitstage_{p_key}") or 0), key=f"at_{p_key}")
-            iv[f"homeoffice_tage_{p_key}"] = st.number_input(
-                "Homeoffice-Tage", 0, 366,
-                int(iv.get(f"homeoffice_tage_{p_key}") or 0),
-                key=f"ho_{p_key}")
+    render_fahrtkosten_homeoffice(iv, personen, aktive)
 
     st.subheader("Weitere Angaben")
     c1, c2, c3 = st.columns(3)
@@ -233,6 +208,12 @@ with tab_check:
                           index=1 if iv.get("hat_kinder") else 0,
                           horizontal=True)
         iv["hat_kinder"] = kinder == "Ja"
+        if iv["hat_kinder"]:
+            iv["kinder_anzahl"] = st.number_input(
+                "Anzahl Kinder (Kindergeld-Anspruch)", 0, 15,
+                int(iv.get("kinder_anzahl") or 0),
+                help="Wirkt auf die zumutbare Belastung (§ 33 Abs. 3 EStG) "
+                     "und die Riester-Kinderzulage.")
     with c2:
         iv["hat_bundeswehr"] = st.checkbox(
             "Übergangsgebührnisse Bundeswehr (2. Arbeitsverhältnis)?",
@@ -252,18 +233,28 @@ with tab_check:
             "Wohnsitz/Einkünfte im Ausland (z. B. Österreich)?",
             value=bool(iv.get("auslandsbezug")))
 
+    st.markdown("**Habt ihr Einnahmen aus einem Betrieb, Nebengewerbe, "
+               "Photovoltaik/Energieverkauf oder freiberuflicher Tätigkeit?**")
+    cols_betrieb = st.columns(len(aktive))
+    for col, p_key in zip(cols_betrieb, aktive):
+        iv[f"hat_betrieb_{p_key}"] = col.checkbox(
+            personen[p_key], value=bool(iv.get(f"hat_betrieb_{p_key}")),
+            key=f"hb_{p_key}")
+    if any(iv.get(f"hat_betrieb_{p}") for p in aktive):
+        st.caption("➡️ Betrieb im Tab 🏭 3 · Betrieb anlegen und Belege dort "
+                  "(bzw. in Tab 1) zuordnen.")
+
     with st.expander("📉 Verlustvorträge aus Vorjahren (lt. Feststellungs-/"
                      "Steuerbescheid)"):
-        v1, v2, v3 = st.columns(3)
-        iv["verlustvortrag_23"] = v1.number_input(
-            "§ 23 / Krypto (€)", 0.0, 10_000_000.0,
-            float(iv.get("verlustvortrag_23") or 0.0), step=100.0)
-        iv["verlustvortrag_kap_aktien"] = v2.number_input(
-            "KAP Aktienverluste (€)", 0.0, 10_000_000.0,
-            float(iv.get("verlustvortrag_kap_aktien") or 0.0), step=100.0)
-        iv["verlustvortrag_kap_sonstige"] = v3.number_input(
-            "KAP sonstige Verluste (€)", 0.0, 10_000_000.0,
-            float(iv.get("verlustvortrag_kap_sonstige") or 0.0), step=100.0)
+        render_verlustvortraege(iv)
+
+    with st.expander("🦽 Behinderung, Pflege & Unterhalt (§ 33b, § 33a EStG "
+                     "– Pauschbeträge OHNE zumutbare Belastung)"):
+        render_behinderung_pflege_unterhalt(iv, personen, aktive)
+
+    with st.expander("💰 Riester-Rente (Anlage AV, § 10a EStG – "
+                     "Günstigerprüfung Zulage vs. Sonderausgabenabzug)"):
+        render_riester(iv, personen, aktive)
 
     st.divider()
     st.subheader("Automatische Prüfung")
