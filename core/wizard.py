@@ -47,7 +47,7 @@ def render_wizard(cfg: dict, api_key: str, model: str, interview: dict,
     st.caption(f"Schritt {idx + 1} von {len(_SCHRITTE)} · {_SCHRITTE[idx]}")
 
     if idx == 0:
-        _schritt_start()
+        _schritt_start(api_key)
     elif idx == 1:
         _schritt_belege(cfg, api_key, model, personen, erklaermodus)
     elif idx == 2:
@@ -58,7 +58,7 @@ def render_wizard(cfg: dict, api_key: str, model: str, interview: dict,
         _schritt_fertig(cfg, interview, erklaermodus)
 
 
-def _schritt_start():
+def _schritt_start(api_key):
     st.title("👋 Willkommen bei deinem Steuer-Assistenten!")
     st.markdown(
         "Wir gehen das gemeinsam in **4 einfachen Schritten** durch:\n\n"
@@ -69,9 +69,10 @@ def _schritt_start():
         "Du brauchst kein Steuer-Wissen – wir erklären alles unterwegs, "
         "und du kannst jederzeit einen Schritt zurückgehen."
     )
-    st.info("💡 Trage links in der Seitenleiste zuerst deinen "
-            "**Anthropic API-Key** ein – damit können Belege automatisch "
-            "gelesen werden.")
+    if not api_key:
+        st.info("💡 Trage links in der Seitenleiste zuerst deinen "
+                "**Anthropic API-Key** ein – damit können Belege automatisch "
+                "gelesen werden.")
     if st.button("Los geht's! →", type="primary"):
         st.session_state.wizard_step = 1
         st.rerun()
