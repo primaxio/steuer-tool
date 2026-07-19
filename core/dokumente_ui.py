@@ -133,27 +133,44 @@ def render_dokumente_tab(cfg: dict, api_key: str, model: str,
     if new_files and st.button(
             f"🔍 {len(new_files)} neue(s) Dokument(e) analysieren",
             type="primary", disabled=not api_key):
-        progress = st.progress(0.0)
-        for i, up in enumerate(new_files):
-            mime = up.type if up.type in SUPPORTED_IMAGE_TYPES | \
-                {"application/pdf"} else "application/pdf"
-            try:
-                result = analyze_document(
-                    up.getvalue(), mime, up.name, api_key, cfg["jahr"], model)
-                zuordnung = bestimme_steuerjahr(result)
-                if zuordnung is None:
-                    zuordnung = cfg["jahr"]
-                    result["rueckfragen"].append(
-                        "Kein Datum erkennbar – Beleg wurde dem aktuellen "
-                        f"Steuerjahr {cfg['jahr']} zugeordnet, bitte prüfen.")
-                result["steuerjahr_zuordnung"] = zuordnung
-                result["_bytes"] = base64.b64encode(up.getvalue()).decode("ascii")
-                result["_mime"] = mime
-                st.session_state.docs.append(result)
-                st.session_state.analyzed_files.add(up.name)
-            except Exception as exc:  # noqa: BLE001
-                st.error(f"Fehler bei '{up.name}': {exc}")
-            progress.progress((i + 1) / len(new_files))
+        # st.status() zeigt SOFORT (noch bevor der erste, evtl. langsame
+        # API-Call zurückkommt) einen Spinner + Label – so ist unmittelbar
+        # sichtbar, dass der Klick angekommen ist und gerade gearbeitet
+        # wird, statt dass bis zum ersten Fortschrittsschritt Stille
+        # herrscht.
+        with st.status(f"Analysiere {len(new_files)} Dokument(e) …",
+                       expanded=True) as status:
+            progress = st.progress(0.0)
+            for i, up in enumerate(new_files):
+                status.update(
+                    label=f"🔍 Analysiere „{up.name}“ ({i + 1}/"
+                          f"{len(new_files)}) …")
+                mime = up.type if up.type in SUPPORTED_IMAGE_TYPES | \
+                    {"application/pdf"} else "application/pdf"
+                try:
+                    result = analyze_document(
+                        up.getvalue(), mime, up.name, api_key, cfg["jahr"],
+                        model)
+                    zuordnung = bestimme_steuerjahr(result)
+                    if zuordnung is None:
+                        zuordnung = cfg["jahr"]
+                        result["rueckfragen"].append(
+                            "Kein Datum erkennbar – Beleg wurde dem "
+                            f"aktuellen Steuerjahr {cfg['jahr']} "
+                            "zugeordnet, bitte prüfen.")
+                    result["steuerjahr_zuordnung"] = zuordnung
+                    result["_bytes"] = base64.b64encode(
+                        up.getvalue()).decode("ascii")
+                    result["_mime"] = mime
+                    st.session_state.docs.append(result)
+                    st.session_state.analyzed_files.add(up.name)
+                    status.write(f"✅ „{up.name}“ → "
+                                f"{cat.label_of(result['kategorie'])}")
+                except Exception as exc:  # noqa: BLE001
+                    status.write(f"❌ Fehler bei „{up.name}“: {exc}")
+                progress.progress((i + 1) / len(new_files))
+            status.update(label=f"{len(new_files)} Dokument(e) analysiert",
+                         state="complete")
         st.rerun()
     if new_files and not api_key:
         st.info("Bitte zuerst den API-Key in der Seitenleiste eintragen.")
