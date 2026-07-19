@@ -73,8 +73,8 @@ Finanzamt (ERiC-Zertifizierung nötig) – bewusste Design-Entscheidung.
 - Fristen: cfg["abgabefrist_datum"] (ISO) – 2024: 2025-07-31, 2025:
   2026-07-31; checks.py warnt <45 Tage, Fehler bei Überschreitung
   (Verspätungszuschlag-Hinweis). Tab 5 zeigt Countdown-Metric.
-- Tab-Reihenfolge: Dokumente · Krypto · Fragebogen · Spar-Check ·
-  Ergebnis&ELSTER · Verstehen.
+- Tab-Reihenfolge (Stand Ausbaustufe 6): Dokumente · Krypto · Betrieb ·
+  Fragebogen · Spar-Check · Ergebnis&ELSTER · Verstehen.
 
 ## Einfacher Modus (geführter Wizard)
 - `core/wizard.py` – render_wizard(): lineare 5-Schritte-Führung (Start ·
@@ -181,14 +181,102 @@ Finanzamt (ERiC-Zertifizierung nötig) – bewusste Design-Entscheidung.
 - Für exakte Ergebnisse EZB-TAGESkurse laden (eurofxref-hist.csv);
   Monatsdurchschnitte erzeugen wenige % Abweichung.
 
+## Code- und Steuer-Audit-Prozess
+- `AUDIT.md` – lebendes Dokument (nicht nur einmalig): technischer +
+  steuerfachlicher Review, priorisiert kritisch/mittel/gering. Kritische
+  Funde werden direkt behoben (mit Regressionstest), mittlere/geringe
+  Funde bleiben als Vorschlagsliste bis zur expliziten Freigabe.
+- Erste Runde (07/2026) behoben: KeyError-Crash-Risiko bei fehlendem
+  "extrahierte_daten"-Key (checks.py, IMMER `.get("extrahierte_daten", {})`
+  verwenden, NIE `d["extrahierte_daten"]`), krypto_report-Dokumente ohne
+  FIFO-Engine fehlten in der Steuerschätzung (jetzt Fallback mit
+  Doppelzählungs-Schutz), Übergangsbeihilfe floss nirgends in Rechnung/
+  Export ein (jetzt konservativ voll versteuert + Fünftelregelung-Hinweis,
+  siehe unten).
+- Offen laut AUDIT.md (Rückfrage nötig, nicht ungefragt umsetzen):
+  Verlustvortrag-Verrechnung ist nur Anzeige ohne Wirkung, Fünftelregelung
+  § 34 EStG nicht berechnet, Vorsorgeaufwand-Höchstbetrag nur grob
+  geschätzt, Günstigerprüfung KAP nur Hinweis ohne Vergleichsrechnung,
+  Abgabefrist-Hinweistext "mit Berater" 2025 falsch (Text sagt 30.04.2027,
+  korrekt wäre 01.03.2027).
+- Pausch-/Freibeträge werden bei Gelegenheit gegen aktuelle BMF-/
+  Fachportal-Quellen gegengeprüft (WebSearch), nicht nur aus dem
+  Trainingswissen übernommen – Abweichungen landen in AUDIT.md.
+
+## Betriebsmodul (EÜR, Anlage G/S) – Ausbaustufe 6
+- `core/betrieb.py` – Datenmodell Betrieb/Position/AfaPosition (dataclasses,
+  Daten als ISO-Strings statt datetime → persist.py braucht keine
+  Sonderbehandlung). berechne_euer(betrieb, jahr, cfg): Einnahmen −
+  Ausgaben − AfA = Gewinn. AfaPosition.afa_fuer_jahr(): lineare AfA,
+  zeitanteilig nach VOLLEN MONATEN im Anschaffungsjahr (§ 7 Abs. 1 EStG) –
+  über monatliche_afa × Monate-im-Jahr, nicht grob pro-rata übers Jahr.
+- Steuerliche Sonderregeln als Hinweise (NIE hart kodiert, alle
+  Schwellwerte aus cfg): § 3 Nr. 72 EStG PV-Steuerbefreiung bis 30 kWp
+  GILT NUR FÜR STROM, nicht für Wärme (Fernwärme/BHKW bleibt gewerblich –
+  Namens-Heuristik warnt, wenn "wärme"/"bhkw" im Betriebsnamen steht trotz
+  art≠photovoltaik). § 19 UStG Kleinunternehmer-Umsatzgrenzen sind
+  JAHRESABHÄNGIG (2024: 22.000 €/50.000 €, ab 2025: 25.000 €/100.000 € –
+  JStG 2024) → cfg["kleinunternehmer_grenze_vorjahr"/"_laufend"].
+  § 11 GewStG Gewerbesteuer-Freibetrag 24.500 € NUR bei art=="gewerblich"
+  (Freiberufler zahlen keine Gewerbesteuer).
+- Kategorien "betrieb_einnahme"/"betrieb_ausgabe": Vision extrahiert
+  betrieb_zuordnung, netto/umsatzsteuer/brutto, menge_und_einheit,
+  gegenpartei, bei Anschaffungen ist_anlagegut + geschaetzte_nutzungsdauer.
+  Anlagegüter werden NICHT automatisch als AfA übernommen (steuerlich zu
+  wichtig für Stillschweigen) – Tab 🏭 Betrieb zeigt sie als Vorschlag mit
+  Bestätigungs-Button (core/betrieb_ui.py::_anlagegut_vorschlaege).
+- `core/betrieb_ui.py` – Tab "🏭 3 · Betrieb": Betriebe anlegen, EÜR-
+  Übersicht, Einnahmen-/Ausgaben-/AfA-Tabellen (aus Belegen via
+  _sync_docs_in_betrieb() automatisch befüllt, dedupliziert über
+  Positon.quelle=Dateiname, + manuelle st.form-Eingabe). Ergebnis landet
+  in interview["_betriebe"] (gewinn_pro_person je P1/P2) – analog zum
+  Krypto-Modul-Pattern (interview["_crypto"]), von veranlagung.py/
+  elster_export.py/checks.py gelesen, OHNE core.betrieb direkt zu
+  importieren (lose Kopplung).
+- Fragebogen "hat_betrieb_{P}" je Person (Tab Fragebogen); Gewinn fließt
+  als eigene Einkunftsart (Schritt "1b") in berechne_veranlagung ein;
+  eigener Export-Block "Anlage G / Anlage EÜR" in elster_export.py
+  (Anlage-Label je nach art: G/S/V); checks.py warnt bei Betrieb ohne
+  Belege, unbestätigten Anlagegut-Belegen und promotet "⚠️"-Hinweise aus
+  betrieb.py (Umsatzgrenzen etc.) zu zentralen Findings.
+
+## Chat-Dokumenten-Triage & Zuordnungs-Historie
+- `core/vision.py::_berechne_klaerungsbedarf()` – deterministisch in
+  Python (NICHT vom Modell behauptet, daher reproduzierbar testbar):
+  true bei confidence<0.7, Kategorie "sonstiges" ODER fehlenden
+  steuerlich relevanten Angaben (Betrag/Datum fehlt, offene Rückfrage,
+  bei Betriebsbelegen fehlende betrieb_zuordnung).
+- `core/erklaerungen.py::klaerungs_chat()` – Steuerberater-Chat für EIN
+  konkretes unklares Dokument, Kontext = extrahierte Daten + Kategorien
+  aus categories.py + Personen + Betriebe. Antwortet strukturiert
+  {"antwort", "vorschlag": {...}, "sicher": bool} – "sicher" erst true
+  bei konkreter, begründeter Zuordnung ohne offene Rückfrage.
+- `core/dokumente_ui.py` – Bereich "❓ Klärung nötig (N)" oben in Tab 1,
+  Mini-Chat pro Dokument (eigener Verlauf in
+  session_state[f"klaerchat_{dateiname}"]). Bei "sicher": true → Button
+  "✅ Zuordnung übernehmen" (_uebernehme_chat_vorschlag()) setzt
+  Kategorie/Inhaber/Betrieb/Steuerjahr/Betrag, klaerungsbedarf=False,
+  protokolliert in doc["hinweise"] UND doc["zuordnungs_historie"].
+- Jedes Dokument führt "zuordnungs_historie" (Liste von
+  {zeitpunkt, aktion, von, nach, quelle: automatisch|chat|manuell,
+  begruendung}) – initialer Eintrag von analyze_document(), weitere bei
+  manueller Korrektur (Tab-1-Selectbox) und Chat-Übernahme
+  (_historie_eintrag()-Helper, ein Aufruf pro Änderungsereignis).
+- elster_export.py rendert einen Anhang "Herkunft der Werte" – NUR für
+  Dokumente mit mehr als dem initialen Automatik-Eintrag (sonst wäre der
+  Anhang bei jedem einzelnen Beleg redundant).
+- persist.py brauchte KEINE Änderung: Dokumente sind bereits reine Dicts,
+  zuordnungs_historie wird als weiterer Key transparent mitgespeichert/
+  -geladen (durch tests/test_klaerung.py abgesichert).
+
 ## Architektur
-- `app.py` – Streamlit-UI, 3 Tabs (Dokumente / Fragebogen & Prüfung /
-  ELSTER-Hilfe & Export). State in st.session_state: docs, interview,
-  analyzed_files.
+- `app.py` – Streamlit-UI, 7 Tabs (Dokumente / Krypto / Betrieb /
+  Fragebogen & Prüfung / Spar-Check / Ergebnis & ELSTER / Verstehen).
+  State in st.session_state: docs, interview, analyzed_files, betriebe.
 - `core/tax_config.py` – Pauschbeträge pro Jahr (TAX_YEARS-Dict).
   Neues Jahr = Block kopieren + BMF-Werte eintragen. Fallback auf
   nächstliegendes Jahr mit Warnung (_geprueft=False).
-- `core/categories.py` – 11 Dokumentkategorien → Anlagen-Mapping.
+- `core/categories.py` – 13 Dokumentkategorien → Anlagen-Mapping.
 - `core/vision.py` – Anthropic-API-Call (PDF als document-Block, Bilder
   als image-Block, base64). System-Prompt erzwingt striktes JSON.
   Modell: claude-sonnet-4-6 (konfigurierbar in tax_config.VISION_MODEL).
@@ -217,12 +305,20 @@ streamlit run app.py
 ```
 
 ## Tests
-Kein Test-Framework eingerichtet. Schneller Smoketest ohne API:
-Mock-Doc-Dicts an run_checks() und build_summary() übergeben
-(Beispiel-Struktur siehe docs-Format in app.py / vision.py-Rückgabe).
-Bei Änderungen an checks.py oder elster_export.py: Smoketest laufen
-lassen, bevor die App gestartet wird. Sinnvoller nächster Schritt:
-pytest mit Fixtures für die Mock-Dokumente.
+Kein pytest-Framework, aber ein `tests/`-Ordner mit eigenständig
+lauffähigen Smoketests (jeweils `python tests/test_X.py`, reine
+assert-Skripte ohne API-Zugriff – Mock-Doc-Dicts direkt an run_checks()/
+build_summary()/berechne_veranlagung() übergeben):
+- `test_doppelerfassung.py` – Doppelerfassungs-Wächter (Scan vs. Spar-Check)
+- `test_automatik.py` – NK-Abrechnung/Broker-Steuerbericht-Automatik
+- `test_audit_fixes.py` – Regressionen aus dem ersten Audit (KeyError-Fix,
+  krypto_report-Fallback, Übergangsbeihilfe)
+- `test_betrieb.py` – EÜR/AfA-Berechnung, Integration in Rechner + Export
+- `test_klaerung.py` – Chat-Triage-Übernahme, Zuordnungs-Historie,
+  persist.py-Rundreise
+Bei Änderungen an checks.py/veranlagung.py/elster_export.py: alle
+Testdateien laufen lassen, bevor die App gestartet wird (`for f in
+tests/test_*.py; do python "$f"; done`).
 
 ## Bekannte Grenzen / Backlog-Ideen
 - Krypto: Transfers zwischen eigenen Wallets übernehmen Haltefrist nicht
@@ -232,10 +328,16 @@ pytest mit Fixtures für die Mock-Dokumente.
   ERSTER SCHRITT in Claude Code: echte eToro/Coinbase-Exporte durchlaufen
   lassen und Parser nachschärfen
 - Extraktionsqualität bei schlechten Fotos → ggf. Retry mit Hinweis-Prompt
-- Übergangsbeihilfe (Einmalzahlung): Fünftelregelung nur als Hinweis,
-  keine Berechnung
+- Übergangsbeihilfe: wird seit dem Audit voll versteuert in die Rechnung
+  einbezogen (nicht mehr komplett übergangen), Fünftelregelung § 34 EStG
+  aber weiterhin nur als Hinweis, keine echte Berechnung (siehe AUDIT.md)
 - Zumutbare Belastung (agB) wird nicht berechnet, nur erwähnt
 - Belegablage: analysierte Dateien werden nicht gespeichert, nur Metadaten
+- Verlustvortrag-Felder (§ 23, KAP) wirken sich noch nicht auf die
+  Steuerschätzung aus, nur auf die Anzeige (siehe AUDIT.md M1)
+- Betriebsmodul: nur EÜR (§ 4 Abs. 3 EStG), keine Bilanzierung; keine
+  Umsatzsteuer-Voranmeldung; Vermietung (Anlage V) rechnerisch wie EÜR
+  behandelt (strukturell identisch, aber andere Anlage/Terminologie)
 
 ## Wichtig
 Steuerrechtliche Konstanten NIE hart in Logik schreiben – immer über
