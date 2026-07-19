@@ -4,7 +4,12 @@ Dokumentkategorie und ELSTER-Abschnitt sowie der "Frag nach"-Chat
 (Claude erklärt mit den echten Zahlen des Nutzers – keine Rechtsberatung).
 """
 
+import json
+
 import anthropic
+
+from .categories import CATEGORIES
+from .vision import _parse_json
 
 GLOSSAR = {
     "Steuererklärung": "Deine Jahres-Abrechnung mit dem Staat: Du meldest, was du verdient und beruflich/privat ausgegeben hast. Das Finanzamt vergleicht das mit der Steuer, die dein Arbeitgeber schon monatlich abgeführt hat – zu viel gezahlt = Erstattung, zu wenig = Nachzahlung.",
@@ -117,3 +122,57 @@ def frag_steuerberater(frage: str, kontext: str, verlauf: list,
         + (kontext or "noch keine Daten erfasst"),
         messages=messages)
     return "".join(b.text for b in resp.content if b.type == "text")
+
+
+KLAERUNGS_CHAT_SYSTEM = """Du bist ein erfahrener deutscher Steuerberater. Ein Beleg in der
+Steuer-Software konnte nicht sicher automatisch eingeordnet werden. Du sprichst mit dem
+Nutzer, um ihn korrekt zuzuordnen (Kategorie, Person, ggf. Betrieb, Steuerjahr, Betrag).
+
+Verfügbare Kategorien (Schlüssel exakt so verwenden):
+{kategorien}
+
+Kontext zu diesem Beleg, den Personen und angelegten Betrieben (JSON):
+{kontext}
+
+Regeln:
+- Stelle GEZIELTE Rückfragen, wenn etwas fehlt (z. B. wem der Beleg gehört, zu welchem
+  Betrieb er zählt, welches Jahr gemeint ist) – eine Frage nach der anderen, keine Liste.
+- Nutze die extrahierten Daten des Belegs als Ausgangspunkt, wiederhole sie nicht stur.
+- Antworte AUSSCHLIESSLICH mit einem JSON-Objekt, kein Text davor oder danach:
+{{"antwort": "<verständliche Erklärung oder konkrete Rückfrage an den Nutzer, Alltagssprache>",
+  "vorschlag": {{"kategorie": "<Schlüssel oder null>", "inhaber": "P1"|"P2"|null,
+                "betrieb": "<Name oder null>", "steuerjahr": <Jahr als Zahl oder null>,
+                "betrag_eur": <Zahl oder null>,
+                "begruendung": "<kurze steuerliche Begründung für die Zuordnung>"}},
+  "sicher": true/false}}
+- "sicher": true NUR, wenn du eine konkrete, steuerlich begründete Zuordnung anbieten
+  kannst UND keine wesentliche Rückfrage mehr offen ist. Sonst false – dann enthält
+  "antwort" eine konkrete Rückfrage und "vorschlag" bleibt unvollständig (null-Felder).
+- Kurze, klare Alltagssprache – der Nutzer ist Steuer-Laie."""
+
+
+def klaerungs_chat(dokument: dict, frage: str, verlauf: list, api_key: str,
+                   model: str, personen: dict | None = None,
+                   betriebe: list | None = None) -> dict:
+    """Chat zur Klärung eines unsicher erkannten Dokuments. Gibt
+    {"antwort", "vorschlag": {...}, "sicher": bool} zurück."""
+    kategorien_zeilen = "\n".join(
+        f'- "{k}": {v["label"]}' for k, v in CATEGORIES.items())
+    kontext = {
+        "dokument": {k: v for k, v in dokument.items() if k != "_bytes"},
+        "personen": personen or {},
+        "betriebe": [getattr(b, "name", b) for b in (betriebe or [])],
+    }
+    system = KLAERUNGS_CHAT_SYSTEM.format(
+        kategorien=kategorien_zeilen,
+        kontext=json.dumps(kontext, ensure_ascii=False, default=str))
+    client = anthropic.Anthropic(api_key=api_key)
+    messages = list(verlauf) + [{"role": "user", "content": frage}]
+    resp = client.messages.create(model=model, max_tokens=1000, system=system,
+                                  messages=messages)
+    raw = "".join(b.text for b in resp.content if b.type == "text")
+    result = _parse_json(raw)
+    result.setdefault("antwort", raw)
+    result.setdefault("vorschlag", {})
+    result.setdefault("sicher", False)
+    return result

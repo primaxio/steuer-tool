@@ -7,6 +7,7 @@ die relevanten Werte als strukturiertes JSON.
 import base64
 import json
 import re
+from datetime import datetime
 
 import anthropic
 
@@ -118,6 +119,23 @@ def _build_system_prompt() -> str:
     return _SYSTEM_PROMPT.replace("{kategorien}", kat_lines)
 
 
+def _berechne_klaerungsbedarf(result: dict) -> bool:
+    """Klärungsbedarf: unsicher erkannt, 'sonstiges' oder steuerlich
+    relevante Angaben fehlen (Betrag/Datum unklar, offene Rückfrage, bei
+    Betriebsbelegen fehlende Betrieb-Zuordnung). Deterministisch in Python
+    berechnet statt vom Modell selbst behauptet – reproduzierbar testbar."""
+    fehlt_relevantes = (
+        result.get("betrag_eur") is None
+        or not result.get("datum")
+        or bool(result.get("rueckfragen"))
+        or (result.get("kategorie") in ("betrieb_einnahme", "betrieb_ausgabe")
+            and not result.get("extrahierte_daten", {}).get("betrieb_zuordnung"))
+    )
+    return (result.get("confidence", 0.0) < 0.7
+            or result.get("kategorie") == "sonstiges"
+            or fehlt_relevantes)
+
+
 def _content_block(file_bytes: bytes, mime: str) -> dict:
     data = base64.standard_b64encode(file_bytes).decode("ascii")
     if mime == "application/pdf":
@@ -192,4 +210,12 @@ def analyze_document(
     result.setdefault("hinweise", [])
     result.setdefault("betrag_eur", None)
     result["dateiname"] = filename
+
+    result["klaerungsbedarf"] = _berechne_klaerungsbedarf(result)
+    result["zuordnungs_historie"] = [{
+        "zeitpunkt": datetime.now().isoformat(timespec="seconds"),
+        "aktion": "automatische Kategorisierung",
+        "von": None, "nach": result["kategorie"], "quelle": "automatisch",
+        "begruendung": f"Claude Vision, Confidence {result['confidence']:.0%}",
+    }]
     return result

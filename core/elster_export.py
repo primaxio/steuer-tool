@@ -210,6 +210,15 @@ def build_summary(docs: list, cfg: dict, interview: dict) -> dict:
             "gewinn_pro_person": betriebe_daten["gewinn_pro_person"],
         }
 
+    # ---------- Herkunft der Werte (Zuordnungs-Historie) ----------
+    # Nur Dokumente, deren Zuordnung über die reine Automatik hinausging
+    # (manuell korrigiert oder per Klärungs-Chat) – sonst wäre der Anhang
+    # bei jedem Beleg redundant mit "automatisch erkannt".
+    s["dokumente_historie"] = [
+        {"dateiname": d["dateiname"], "historie": d["zuordnungs_historie"]}
+        for d in docs
+        if len(d.get("zuordnungs_historie") or []) > 1]
+
     return s
 
 
@@ -471,6 +480,25 @@ def render_elster_help(s: dict, erklaeren: bool = True) -> str:
             if v > 0:
                 out.append(f"- {labels[k]}: {e(v)}")
         out.append("")
+
+    historie = s.get("dokumente_historie") or []
+    if historie:
+        out += ["## Anhang: Herkunft der Werte", ""]
+        for eintrag in historie:
+            out.append(f"**`{eintrag['dateiname']}`**")
+            for schritt in eintrag["historie"]:
+                von = schritt.get("von") or "–"
+                nach = schritt.get("nach") or "–"
+                quelle_label = {"automatisch": "🤖 automatisch",
+                               "chat": "💬 Chat-Klärung",
+                               "manuell": "✍️ manuell"}.get(
+                    schritt.get("quelle"), schritt.get("quelle", "–"))
+                out.append(
+                    f"- {schritt.get('zeitpunkt', '–')} · {quelle_label}: "
+                    f"{schritt.get('aktion', '–')} ({von} → {nach})"
+                    + (f" – _{schritt['begruendung']}_"
+                       if schritt.get("begruendung") else ""))
+            out.append("")
 
     out += [
         "---",
