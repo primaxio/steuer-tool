@@ -4,7 +4,7 @@ Haltefrist-Logik (§ 23 EStG), Optimizer für offene Positionen und
 Steuerschätzung nach § 32a EStG (inkl. Splitting-Verfahren).
 """
 
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, asdict
 from datetime import date, datetime, timedelta
 from collections import deque
 

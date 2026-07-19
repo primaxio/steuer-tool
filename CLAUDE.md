@@ -191,14 +191,47 @@ Finanzamt (ERiC-Zertifizierung nötig) – bewusste Design-Entscheidung.
   verwenden, NIE `d["extrahierte_daten"]`), krypto_report-Dokumente ohne
   FIFO-Engine fehlten in der Steuerschätzung (jetzt Fallback mit
   Doppelzählungs-Schutz), Übergangsbeihilfe floss nirgends in Rechnung/
-  Export ein (jetzt konservativ voll versteuert + Fünftelregelung-Hinweis,
-  siehe unten).
-- Offen laut AUDIT.md (Rückfrage nötig, nicht ungefragt umsetzen):
-  Verlustvortrag-Verrechnung ist nur Anzeige ohne Wirkung, Fünftelregelung
-  § 34 EStG nicht berechnet, Vorsorgeaufwand-Höchstbetrag nur grob
-  geschätzt, Günstigerprüfung KAP nur Hinweis ohne Vergleichsrechnung,
-  Abgabefrist-Hinweistext "mit Berater" 2025 falsch (Text sagt 30.04.2027,
-  korrekt wäre 01.03.2027).
+  Export ein.
+- Zweite Runde (07/2026, nach expliziter Freigabe "alles aufräumen und
+  fixen") – alle A.2/A.3-Funde aus AUDIT.md umgesetzt:
+  - M1: Verlustvortrag § 23/KAP wirkt jetzt WIRKLICH mindernd (vorher nur
+    Anzeige) – `interview["verlustvortrag_23"]` mindert Krypto-Gewinn vor
+    Freigrenzenprüfung, `verlustvortrag_kap_*` mindert die KAP-
+    Bemessungsgrundlage (Schritt 10/10b in veranlagung.py).
+  - M2: Vorsorgeaufwand-Höchstbetrag (§ 10 Abs. 4 EStG, 1.900 €/Person
+    Arbeitnehmer) jetzt real berechnet statt pauschal 19 % geschätzt –
+    `cfg["vorsorge_hoechstbetrag_arbeitnehmer"/"_selbststaendig"]`,
+    sonstige Vorsorgeaufwendungen (private Zusatzversicherungen) wirken
+    nur noch bis zum Deckel zusätzlich zu RV/KV/PV.
+  - M4: eToro-Parser parst vorzeichenbehaftete Beträge mit
+    Tausendertrennzeichen korrekt (`_clean_num_signed()` statt der alten
+    `.replace()`-Kette, die bei negativen Werten crashte/falsch rundete).
+  - M8: Übergangsbeihilfe fließt jetzt mit eigenem Lohnsteuerabzug
+    (lohnsteuer/soli/kirchensteuer aus vision.py-Extraktion) in die
+    Rechnung UND wird automatisch gegen die Fünftelregelung geprüft
+    (siehe unten) statt nur als Hinweistext.
+  - Fünftelregelung § 34 Abs. 1, Abs. 2 Nr. 4 EStG: NEUES eigenständiges,
+    separat getestetes Modul `core/fuenftelregelung.py`
+    (`fuenftelregelung()`), rechnet die Vergleichsrechnung (normale
+    Besteuerung vs. Fünftel-Methode) für außerordentliche Einkünfte
+    (aktuell: Übergangsbeihilfe) automatisch durch und wählt die
+    günstigere Variante – kein reiner Hinweistext mehr.
+  - Günstigerprüfung KAP (§ 32d Abs. 6 EStG): veranlagung.py Schritt 10b
+    vergleicht jetzt den tatsächlichen Grenzsteuersatz mit der 25 %
+    Abgeltungsteuer und wendet automatisch den günstigeren an, inkl.
+    Rechenweg-Ausweis der Ersparnis – vorher nur ein Hinweis ohne
+    Berechnung.
+  - Abgabefrist-Hinweistext 2025 korrigiert (30.04.2027 → 01.03.2027,
+    da mit Steuerberater).
+  - Kleinere technische Aufräumarbeiten: `jahr_zuordnung.ist_im_jahr()`
+    als gemeinsames Prädikat (vorher doppelte Mengen-Logik in
+    dokumente_ui.py), PDF-Report-Dateiname kollisionssicher
+    (uuid-Suffix), `ruff`-Lint-Setup (siehe unten).
+- Ruff-Lint-Setup: `pyproject.toml` mit `[tool.ruff.lint] select = ["F"]`
+  – bewusst NUR Pyflakes (unbenutzte Imports, undefinierte Namen,
+  Doppel-Definitionen), keine Stilregeln (E7xx/E4xx), um keinen
+  großflächigen Reformatierungs-Diff zu erzwingen. `ruff check .` vor
+  größeren Änderungen laufen lassen.
 - Pausch-/Freibeträge werden bei Gelegenheit gegen aktuelle BMF-/
   Fachportal-Quellen gegengeprüft (WebSearch), nicht nur aus dem
   Trainingswissen übernommen – Abweichungen landen in AUDIT.md.
@@ -285,6 +318,9 @@ Finanzamt (ERiC-Zertifizierung nötig) – bewusste Design-Entscheidung.
   (0,30 €/km bis 20 km, 0,38 € ab km 21).
 - `core/elster_export.py` – build_summary() aggregiert pro Anlage,
   render_elster_help() erzeugt Markdown, export_json() Rohdaten.
+- `core/fuenftelregelung.py` – fuenftelregelung(): Vergleichsrechnung
+  § 34 Abs. 1/Abs. 2 Nr. 4 EStG für außerordentliche Einkünfte, von
+  veranlagung.py aufgerufen, eigenständig getestet.
 
 ## Konventionen
 - Sprache: Code-Kommentare, UI und Prompts auf Deutsch.
@@ -316,9 +352,15 @@ build_summary()/berechne_veranlagung() übergeben):
 - `test_betrieb.py` – EÜR/AfA-Berechnung, Integration in Rechner + Export
 - `test_klaerung.py` – Chat-Triage-Übernahme, Zuordnungs-Historie,
   persist.py-Rundreise
+- `test_audit_nachbesserungen.py` – Regressionen der zweiten Audit-Runde
+  (M2 Vorsorge-Höchstbetrag, M4 eToro-Vorzeichen-Parsing u. a.)
+- `test_fuenftelregelung.py` – eigenständiges Modul-Test für
+  `core/fuenftelregelung.py` (u. a. mathematischer Neutralitätsbeweis in
+  der linearen Tarifzone, nie schlechter als Normalbesteuerung)
 Bei Änderungen an checks.py/veranlagung.py/elster_export.py: alle
 Testdateien laufen lassen, bevor die App gestartet wird (`for f in
-tests/test_*.py; do python "$f"; done`).
+tests/test_*.py; do python "$f"; done`). Zusätzlich `ruff check .` für
+den Pyflakes-Lint-Durchlauf (unbenutzte Imports/undefinierte Namen).
 
 ## Bekannte Grenzen / Backlog-Ideen
 - Krypto: Transfers zwischen eigenen Wallets übernehmen Haltefrist nicht
@@ -328,16 +370,14 @@ tests/test_*.py; do python "$f"; done`).
   ERSTER SCHRITT in Claude Code: echte eToro/Coinbase-Exporte durchlaufen
   lassen und Parser nachschärfen
 - Extraktionsqualität bei schlechten Fotos → ggf. Retry mit Hinweis-Prompt
-- Übergangsbeihilfe: wird seit dem Audit voll versteuert in die Rechnung
-  einbezogen (nicht mehr komplett übergangen), Fünftelregelung § 34 EStG
-  aber weiterhin nur als Hinweis, keine echte Berechnung (siehe AUDIT.md)
 - Zumutbare Belastung (agB) wird nicht berechnet, nur erwähnt
 - Belegablage: analysierte Dateien werden nicht gespeichert, nur Metadaten
-- Verlustvortrag-Felder (§ 23, KAP) wirken sich noch nicht auf die
-  Steuerschätzung aus, nur auf die Anzeige (siehe AUDIT.md M1)
 - Betriebsmodul: nur EÜR (§ 4 Abs. 3 EStG), keine Bilanzierung; keine
   Umsatzsteuer-Voranmeldung; Vermietung (Anlage V) rechnerisch wie EÜR
   behandelt (strukturell identisch, aber andere Anlage/Terminologie)
+- Ausbaustufe-5-Connectors (Coinbase-API, Base-Chain) weiterhin
+  ⚠️ LIVE UNGETESTET – kann ohne echten API-Zugriff nicht verifiziert
+  werden, siehe Abschnitt oben
 
 ## Wichtig
 Steuerrechtliche Konstanten NIE hart in Logik schreiben – immer über

@@ -103,10 +103,60 @@ Live per Web-Suche gegengeprüft (19.07.2026):
 
 ## Offene Fragen an dich
 
-1. **M1 (Verlustvortrag-Verrechnung)** – soll ich das umsetzen? Überschaubarer Aufwand, würde die Schätzung genauer machen.
-2. **Fünftelregelung (§ 34 EStG)** – soll ich ein eigenständiges, separat getestetes Berechnungsmodul dafür bauen (B.2)?
-3. **Günstigerprüfung KAP** – echte Vergleichsrechnung statt nur Hinweis?
-4. **M7 (Abgabefrist-Text)** – einfache Korrektur, soll ich das direkt mit übernehmen?
-5. Alle "gering"-Punkte (A.3) – nur zur Kenntnis, oder sollen einzelne davon (z. B. die `_init_.py`-Dateien löschen) gleich mit erledigt werden?
+1. ~~**M1 (Verlustvortrag-Verrechnung)**~~ – soll ich das umsetzen? Überschaubarer Aufwand, würde die Schätzung genauer machen.
+2. ~~**Fünftelregelung (§ 34 EStG)**~~ – soll ich ein eigenständiges, separat getestetes Berechnungsmodul dafür bauen (B.2)?
+3. ~~**Günstigerprüfung KAP**~~ – echte Vergleichsrechnung statt nur Hinweis?
+4. ~~**M7 (Abgabefrist-Text)**~~ – einfache Korrektur, soll ich das direkt mit übernehmen?
+5. ~~Alle "gering"-Punkte (A.3)~~ – nur zur Kenntnis, oder sollen einzelne davon (z. B. die `_init_.py`-Dateien löschen) gleich mit erledigt werden?
 
 Teil 2 (Betriebsmodul) und Teil 3 (Chat-Triage) sind bereits freigegeben und werden im Anschluss unabhängig von diesen Rückfragen umgesetzt.
+
+---
+
+## Status-Update (19.07.2026, nach Freigabe "alles aufräumen und fixen")
+
+Alle offenen Fragen oben wurden mit Ja beantwortet. Umgesetzt und durch
+Regressionstests abgesichert (`tests/test_audit_nachbesserungen.py`,
+`tests/test_fuenftelregelung.py`, erweiterte `tests/test_audit_fixes.py`):
+
+- **M1** – Verlustvortrag § 23 mindert jetzt den Krypto-Gewinn vor der
+  Freigrenzenprüfung, `verlustvortrag_kap_*` mindert die KAP-
+  Bemessungsgrundlage (veranlagung.py, Schritt 2/10).
+- **M2** – Echte Vorsorgeaufwand-Höchstbetragsberechnung (§ 10 Abs. 3/4
+  EStG), sonstige Vorsorgeaufwendungen wirken nur noch bis zum Deckel
+  (1.900 €/Person Arbeitnehmer, konfigurierbar in tax_config.py).
+- **M3, M5, M6, M7** – bereits in einer vorherigen Teilrunde erledigt
+  (irreführender Warnhinweis entschärft, `ist_im_jahr()`-Prädikat statt
+  struktureller Dict-Vergleiche, KAP/SA/agB-Nicht-Filterung nach Inhaber
+  dokumentiert, Abgabefrist-Text 2025 korrigiert).
+- **M4** – eToro-Parser parst vorzeichenbehaftete Beträge mit
+  Tausendertrennzeichen jetzt korrekt (`_clean_num_signed()`).
+- **M8** – Übergangsbeihilfe erfasst jetzt Lohnsteuer/Soli/Kirchensteuer
+  separat (vision.py-Extraktion + veranlagung.py/elster_export.py).
+- **M9** – bewusst NICHT umgesetzt: eine Verrechnung von im Vorjahr zu
+  viel/zu wenig gezahltem Soli/KiSt würde ein komplett neues
+  Datenmodell (Vorjahresbescheid-Erfassung) voraussetzen, das aktuell
+  nirgends im Tool existiert – das ist eine neue Funktion, kein Bugfix,
+  und bleibt bewusst als Backlog-Idee stehen statt ungefragt eine neue
+  Eingabemaske zu bauen.
+- **Fünftelregelung § 34 EStG** – eigenständiges Modul
+  `core/fuenftelregelung.py`, automatische Vergleichsrechnung statt
+  Hinweistext, separat getestet (inkl. mathematischem
+  Neutralitätsbeweis in der linearen Tarifzone).
+- **Günstigerprüfung KAP § 32d Abs. 6 EStG** – echte Vergleichsrechnung
+  (persönlicher Grenzsteuersatz vs. 25 % Abgeltungsteuer) statt reinem
+  Hinweis.
+- **A.3 Gering**: `report.py`-Pfadkollision behoben (uuid-Suffix);
+  `ruff`-Lint-Setup ergänzt (`pyproject.toml`, `select = ["F"]`) und
+  3 echte unbenutzte Imports entfernt; die `_init_.py`-Tippfehler-Dateien
+  existierten bei Prüfung nicht mehr im Repo (bereits anderweitig
+  bereinigt); Connectors bleiben ⚠️ LIVE UNGETESTET (kein Fix ohne
+  echten API-Zugriff möglich); `_clean_num()`-Regex-Robustheitshinweis
+  bleibt als Kenntnisnahme stehen (kein bekannter Bug, kein konkreter
+  Anwendungsfall für exotische Formate wie `"1'234.56"` bei deutschen
+  Steuerbelegen).
+
+Damit sind alle A.2/A.3-Funde aus diesem Audit abgearbeitet (mit
+Ausnahme von M9, s. o.). Neue, tiefere Funde (z. B. aus B.1 "Niedrig":
+Anlage AV/R/V, Behinderten-Pauschbetrag) sind nicht Teil dieser Runde
+und bräuchten eine eigene Freigabe.

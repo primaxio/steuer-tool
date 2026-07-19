@@ -306,8 +306,12 @@ def render_crypto_tab(cfg: dict, api_key: str, model: str,
     st.divider()
     if st.button("📑 Prüfungsfesten Steuerreport (PDF) erstellen",
                  use_container_width=True):
+        import uuid
         from .report import erstelle_report
-        pfad = f"/tmp/krypto_steuerreport_{cfg['jahr']}.pdf"
+        # Eindeutiger Dateiname gegen Kollisionen bei mehreren gleichzeitigen
+        # Nutzern/Sessions auf demselben Rechner (z. B. lokale Entwicklung) –
+        # der Download-Dateiname bleibt für den Nutzer unverändert sauber.
+        pfad = f"/tmp/krypto_steuerreport_{cfg['jahr']}_{uuid.uuid4().hex[:8]}.pdf"
         erstelle_report(pfad, cfg["jahr"], personen, agg, disposals,
                         open_lots, ss.crypto_results["warnungen"],
                         interview.get("stammdaten"))

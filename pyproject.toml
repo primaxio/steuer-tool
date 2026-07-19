@@ -1,0 +1,8 @@
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+# Bewusst eng gefasst: nur Pyflakes-Regeln (echte Bug-Klassen wie unbenutzte
+# Imports, undefinierte Namen, doppelte Definitionen) – keine Stilvorgaben
+# (E7xx/E4xx), um keinen großflächigen Reformatierungs-Diff zu erzwingen.
+select = ["F"]

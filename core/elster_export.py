@@ -7,7 +7,6 @@ Erzeugt pro Anlage eine Liste "Feld → Wert", die 1:1 in ELSTER
 import json
 from datetime import datetime
 
-from .categories import label_of
 from .checks import _num, entfernungspauschale
 
 
