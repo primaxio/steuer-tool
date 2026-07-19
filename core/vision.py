@@ -75,6 +75,21 @@ Kategoriespezifische Felder für "extrahierte_daten":
   kap_zeile24_terminverluste (als positive Zahl), so_krypto_gewinn
   (Anlage SO Zeile 47/54, Kontrollwert), broker_name, quellensteuer.
 - Spenden: organisation, betrag, zuwendungsbestaetigung_vorhanden (bool).
+- Betriebseinnahme/-ausgabe (z. B. Gutschrift/Abrechnung eines
+  Energieversorgers für verkauften Strom/Wärme, Ausgangsrechnung,
+  Wartungsrechnung, Materialbeleg, Anschaffungsbeleg eines Nebengewerbes):
+  betrieb_zuordnung (Name/Art des Betriebs, falls aus dem Beleg erkennbar,
+  sonst null), netto, umsatzsteuer, brutto, leistungszeitraum (Zeitraum
+  oder Datum), menge_und_einheit (z. B. "1.234 kWh"), gegenpartei
+  (z. B. "Stadtwerke Bonn"). Bei Anschaffungen von Anlagegütern (Maschinen,
+  Geräte, technische Anlagen wie BHKW/PV): zusätzlich ist_anlagegut (bool,
+  true bei Wirtschaftsgütern > 800 € netto mit mehrjähriger Nutzung) und
+  geschaetzte_nutzungsdauer (Jahre, nach amtlicher AfA-Tabelle schätzen,
+  z. B. technische Anlagen 10 Jahre, Büroausstattung 13 Jahre, PC/Software
+  3 Jahre – bei Unsicherheit vorsichtig schätzen und rueckfrage stellen).
+  Rechnung = "betrieb_einnahme" nur, wenn der Nutzer der Rechnungssteller
+  ist (Ausgangsrechnung/Gutschrift AN ihn); Belege, die er selbst bezahlt
+  hat, sind "betrieb_ausgabe".
 
 Regel für "steuerjahr" (WICHTIG für die automatische Sortierung):
 - Maßgeblich ist das ZAHLUNGS-/Zuflussjahr (§ 11 EStG, Abflussprinzip),

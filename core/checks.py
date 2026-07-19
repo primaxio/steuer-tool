@@ -234,6 +234,39 @@ def run_checks(docs: list, cfg: dict, interview: dict) -> list:
             "eingetragen. Falls beides derselbe Broker ist: manuelle Felder "
             "auf 0 setzen – der Scan übernimmt automatisch.")
 
+    # ---------- Betrieb / Nebengewerbe (EÜR) ----------
+    namen_vorab = interview.get("personen", {"P1": "Person 1", "P2": "Person 2"})
+    betriebe_daten = interview.get("_betriebe") or {"betriebe": []}
+    betriebe_je_person = {
+        r["inhaber"] for r in betriebe_daten["betriebe"]}
+    for p_key in ("P1", "P2"):
+        if interview.get(f"hat_betrieb_{p_key}") and p_key not in betriebe_je_person:
+            add("frage",
+                f"{namen_vorab.get(p_key, p_key)}: Betrieb/Nebengewerbe "
+                "angegeben, aber noch kein Betrieb im Tab 🏭 Betrieb "
+                "angelegt – bitte dort nachtragen, sonst fehlt der Gewinn "
+                "in der Erklärung.")
+    for r in betriebe_daten["betriebe"]:
+        if not (r["einnahmen"] or r["ausgaben"] or r["afa"]):
+            add("frage",
+                f"Betrieb '{r['betrieb']}': Noch keine Einnahmen/Ausgaben "
+                "für dieses Steuerjahr erfasst – Belege hochladen (Kategorie "
+                "Betriebseinnahme/-ausgabe) oder im Tab 🏭 Betrieb manuell "
+                "eintragen.")
+        for h in r.get("hinweise", []):
+            if "⚠️" in h:
+                add("warnung", f"Betrieb '{r['betrieb']}': {h}")
+    anlagegut_belege = [
+        d for d in docs if d.get("kategorie") == "betrieb_ausgabe"
+        and d.get("extrahierte_daten", {}).get("ist_anlagegut")]
+    if anlagegut_belege:
+        add("frage",
+            f"{len(anlagegut_belege)} Beleg(e) sehen nach einem Anlagegut "
+            "aus (Anschaffung mit mehrjähriger Nutzung) – wurden sie im "
+            "Tab 🏭 Betrieb als AfA (Abschreibung über mehrere Jahre) "
+            "erfasst, statt als Sofortausgabe? Sonst wird der Gewinn "
+            "verzerrt.")
+
     # ---------- § 35a ----------
     for d in _docs_by_cat(docs, "handwerker_haushaltsnah"):
         daten = d.get("extrahierte_daten", {})

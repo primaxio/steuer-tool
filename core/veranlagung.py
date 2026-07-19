@@ -56,6 +56,14 @@ def berechne_veranlagung(docs: list, cfg: dict, interview: dict) -> dict:
         step(f"− Werbungskosten {p} (mind. Pauschbetrag)", -wk)
         summe_einkuenfte += einkuenfte
 
+    # ---------- 1b) Einkünfte aus Gewerbebetrieb/selbständiger Arbeit (EÜR)
+    betriebe_daten = interview.get("_betriebe") or {"gewinn_pro_person": {}}
+    for p in aktive:
+        gewinn = betriebe_daten["gewinn_pro_person"].get(p, 0.0)
+        if gewinn:
+            step(f"+ Gewinn aus Gewerbebetrieb/selbst. Arbeit {p} (EÜR)", gewinn)
+            summe_einkuenfte += gewinn
+
     # ---------- 2) Sonstige Einkünfte (Krypto § 23 + § 22 Nr. 3)
     krypto_stpfl = sum(
         a.get("steuerpflichtiger_betrag", 0) + a.get("rewards_steuerpflichtig", 0)

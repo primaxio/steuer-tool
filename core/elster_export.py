@@ -202,6 +202,14 @@ def build_summary(docs: list, cfg: dict, interview: dict) -> dict:
                        "(1–7 % des Gesamtbetrags der Einkünfte).",
         }
 
+    # ---------- Gewerbe & Selbständigkeit (Anlage G / Anlage EÜR) ----------
+    betriebe_daten = interview.get("_betriebe")
+    if betriebe_daten and betriebe_daten.get("betriebe"):
+        s["anlagen"]["Gewerbe & Selbständigkeit (EÜR)"] = {
+            "betriebe": betriebe_daten["betriebe"],
+            "gewinn_pro_person": betriebe_daten["gewinn_pro_person"],
+        }
+
     return s
 
 
@@ -393,6 +401,37 @@ def render_elster_help(s: dict, erklaeren: bool = True) -> str:
             "- Krypto-Report als Nachweis aufbewahren (Vorhaltepflicht).",
             "",
         ]
+
+    gew = s["anlagen"].get("Gewerbe & Selbständigkeit (EÜR)")
+    if gew:
+        out.append("## Gewerbe & Selbständigkeit – Anlage G / Anlage EÜR")
+        erk("Gewerbe & Selbständigkeit (EÜR)")
+        namen = {"P1": "Person 1", "P2": "Person 2"}
+        for r in gew["betriebe"]:
+            anlage = ("Anlage V" if r["art"] == "vermietung" else
+                     "Anlage S" if r["art"] == "freiberuflich" else "Anlage G")
+            out += [
+                f"### {r['betrieb']} ({anlage}) – "
+                f"{namen.get(r['inhaber'], r['inhaber'])}",
+                f"- Betriebseinnahmen: {e(r['einnahmen'])}",
+                f"- Betriebsausgaben: {e(r['ausgaben'])}",
+                f"- Abschreibungen (AfA): {e(r['afa'])}",
+                f"- **Gewinn/Überschuss {r['jahr']}: {e(r['gewinn'])}**",
+            ]
+            if r["afa_positionen"]:
+                out.append("- AfA-Positionen:")
+                for a in r["afa_positionen"]:
+                    out.append(
+                        f"  - {a['bezeichnung']}: {e(a['anschaffungskosten'])} "
+                        f"({a['anschaffungsdatum']}, "
+                        f"{a['nutzungsdauer_jahre']} Jahre ND) → "
+                        f"AfA {r['jahr']}: {e(a['afa_jahr'])}")
+            for h in r["hinweise"]:
+                out.append(f"- {'⚠️ ' if '⚠️' in h else 'ℹ️ '}{h}")
+            out.append("")
+        gesamt = sum(gew["gewinn_pro_person"].values())
+        out += [f"**Gesamtgewinn aus Gewerbe/Selbständigkeit: {e(gesamt)}** "
+               "(fließt in die Summe der Einkünfte ein).", ""]
 
     for name in ("Sonderausgaben", "Vorsorgeaufwand",
                  "Haushaltsnahe Aufwendungen", "Außergewöhnliche Belastungen"):

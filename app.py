@@ -7,6 +7,7 @@ import os
 
 import streamlit as st
 
+from core.betrieb_ui import render_betrieb_tab
 from core.checks import run_checks
 from core.dokumente_ui import render_dokumente_tab
 from core.elster_export import build_summary, export_json, render_elster_help
@@ -158,10 +159,11 @@ if einfacher_modus:
                  erklaermodus)
     st.stop()
 
-tab_docs, tab_crypto, tab_check, tab_spar, tab_elster, tab_basics = st.tabs(
-    ["📄 1 · Dokumente", "₿ 2 · Krypto", "❓ 3 · Fragebogen & Prüfung",
-     "💰 4 · Spar-Check", "🧮 5 · Ergebnis & ELSTER",
-     "📖 6 · Verstehen & Fragen"])
+(tab_docs, tab_crypto, tab_betrieb, tab_check, tab_spar, tab_elster,
+ tab_basics) = st.tabs(
+    ["📄 1 · Dokumente", "₿ 2 · Krypto", "🏭 3 · Betrieb",
+     "❓ 4 · Fragebogen & Prüfung", "💰 5 · Spar-Check",
+     "🧮 6 · Ergebnis & ELSTER", "📖 7 · Verstehen & Fragen"])
 
 with tab_spar:
     render_sparcheck(st.session_state.interview, personen)
@@ -169,6 +171,9 @@ with tab_spar:
 with tab_crypto:
     render_crypto_tab(cfg, api_key, model, st.session_state.interview,
                       personen)
+
+with tab_betrieb:
+    render_betrieb_tab(cfg, st.session_state.interview, personen)
 
 # ---------------------------------------------------------------- Tab 1
 with tab_docs:
@@ -251,6 +256,17 @@ with tab_check:
         iv["auslandsbezug"] = st.checkbox(
             "Wohnsitz/Einkünfte im Ausland (z. B. Österreich)?",
             value=bool(iv.get("auslandsbezug")))
+
+    st.markdown("**Habt ihr Einnahmen aus einem Betrieb, Nebengewerbe, "
+               "Photovoltaik/Energieverkauf oder freiberuflicher Tätigkeit?**")
+    cols_betrieb = st.columns(len(aktive))
+    for col, p_key in zip(cols_betrieb, aktive):
+        iv[f"hat_betrieb_{p_key}"] = col.checkbox(
+            personen[p_key], value=bool(iv.get(f"hat_betrieb_{p_key}")),
+            key=f"hb_{p_key}")
+    if any(iv.get(f"hat_betrieb_{p}") for p in aktive):
+        st.caption("➡️ Betrieb im Tab 🏭 3 · Betrieb anlegen und Belege dort "
+                  "(bzw. in Tab 1) zuordnen.")
 
     with st.expander("📉 Verlustvorträge aus Vorjahren (lt. Feststellungs-/"
                      "Steuerbescheid)"):

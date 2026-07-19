@@ -94,6 +94,24 @@ CATEGORIES = {
         "anlage": "Anlage Außergewöhnliche Belastungen",
         "beschreibung": "Arzt-, Zahnarzt-, Brillen-, Medikamentenrechnungen etc.",
     },
+    "betrieb_einnahme": {
+        "label": "Betriebseinnahme (Gutschrift, Ausgangsrechnung)",
+        "anlage": "Anlage G/S – Einnahmen-Überschuss-Rechnung (EÜR)",
+        "beschreibung": (
+            "Einnahme eines Betriebs/Nebengewerbes, z. B. Gutschrift/"
+            "Abrechnung des Energieversorgers oder eigene Ausgangsrechnung. "
+            "Wird im Tab 'Betrieb' einem angelegten Betrieb zugeordnet."
+        ),
+    },
+    "betrieb_ausgabe": {
+        "label": "Betriebsausgabe (Wartung, Material, Anschaffung)",
+        "anlage": "Anlage G/S – Einnahmen-Überschuss-Rechnung (EÜR)",
+        "beschreibung": (
+            "Ausgabe eines Betriebs/Nebengewerbes, z. B. Wartung, Material "
+            "oder Anschaffung eines Anlageguts (AfA). Wird im Tab 'Betrieb' "
+            "einem angelegten Betrieb zugeordnet."
+        ),
+    },
     "sonstiges": {
         "label": "Sonstiges / Unklar",
         "anlage": "— manuell zuordnen —",

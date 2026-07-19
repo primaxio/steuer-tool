@@ -110,6 +110,19 @@ def render_dokumente_tab(cfg: dict, api_key: str, model: str,
                         d["kategorie"] = new_cat
                         d["confidence"] = 1.0
                         st.rerun()
+                    if d["kategorie"] in ("betrieb_einnahme", "betrieb_ausgabe"):
+                        betriebe = st.session_state.get("betriebe", [])
+                        if betriebe:
+                            namen = [b.name for b in betriebe]
+                            aktuell = d.get("betrieb")
+                            d["betrieb"] = st.selectbox(
+                                "Gehört zu Betrieb", namen,
+                                index=namen.index(aktuell)
+                                if aktuell in namen else 0,
+                                key=f"betr_{i}")
+                        else:
+                            st.caption("⚠️ Noch kein Betrieb angelegt – "
+                                      "im Tab 🏭 Betrieb zuerst anlegen.")
                     d["steuerjahr_zuordnung"] = st.number_input(
                         "Steuerjahr", 2020, 2035,
                         int(d.get("steuerjahr_zuordnung", cfg["jahr"])),

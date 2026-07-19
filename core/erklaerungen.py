@@ -47,6 +47,8 @@ KATEGORIE_ERKLAERUNG = {
     "nebenkostenabrechnung": "Deine Betriebskostenabrechnung enthält versteckte Steuer-Rabatte: 20 % der Lohnkosten für Hausmeister, Treppenhausreinigung & Co. zieht das Finanzamt direkt von der Steuer ab. Das Tool hat die begünstigten Posten automatisch herausgesucht – Grundsteuer, Wasser und Heizöl zählen nicht.",
     "broker_steuerbericht": "Der offizielle Jahresbericht deines Brokers. Termingeschäfte (CFDs) und Zinsen wurden automatisch in die Anlage KAP übernommen – dort werden sie mit ~26,4 % besteuert, weil Auslandsbroker keine Steuer einbehalten. Der Krypto-Wert dient als Kontrollzahl.",
     "krankheitskosten": "Arzt-, Zahnarzt-, Brillenkosten zählen als außergewöhnliche Belastung – aber erst oberhalb deiner 'zumutbaren Belastung' (einige Prozent des Einkommens). Sammeln lohnt in teuren Jahren.",
+    "betrieb_einnahme": "Eine Einnahme aus deinem Betrieb oder Nebengewerbe (z. B. eine Gutschrift vom Energieversorger für verkauften Strom/Wärme). Ordne sie im Tab 'Betrieb' dem richtigen Betrieb zu – zusammen mit den Ausgaben ergibt das deinen Gewinn (Einnahmen-Überschuss-Rechnung).",
+    "betrieb_ausgabe": "Eine Ausgabe deines Betriebs (Wartung, Material, Anschaffung). Sie mindert deinen Gewinn – bei größeren Anschaffungen (Anlagegütern) wird der Betrag nicht auf einmal, sondern über mehrere Jahre verteilt abgeschrieben (AfA).",
     "sonstiges": "Konnte nicht sicher zugeordnet werden – bitte einmal kurz prüfen und die richtige Kategorie wählen.",
 }
 
@@ -58,6 +60,7 @@ ANLAGEN_ERKLAERT = {
     "Vorsorgeaufwand": "💡 *Einfach erklärt: Deine Versicherungsbeiträge. Kranken- und Pflegeversicherung zählen fast immer voll.*",
     "Haushaltsnahe Aufwendungen": "💡 *Einfach erklärt: 20 % der Handwerker-Arbeitskosten werden dir DIREKT von der Steuer abgezogen – das ist bares Geld, kein bloßer Abzugsposten.*",
     "Außergewöhnliche Belastungen": "💡 *Einfach erklärt: Hohe Krankheitskosten zählen erst, wenn sie deine 'zumutbare' Eigenbeteiligung übersteigen.*",
+    "Gewerbe & Selbständigkeit (EÜR)": "💡 *Einfach erklärt: Betreibst du nebenbei ein Gewerbe (z. B. Stromverkauf) oder arbeitest freiberuflich, zählt hier NICHT der Umsatz, sondern der GEWINN: Einnahmen minus Ausgaben minus Abschreibungen (AfA – große Anschaffungen werden über mehrere Jahre verteilt abgezogen, nicht auf einmal). Dieser Gewinn wird wie Gehalt zu deinem übrigen Einkommen addiert.*",
 }
 
 STEUER_101 = """

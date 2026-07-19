@@ -29,6 +29,9 @@ TAX_YEARS = {
         "abgabefrist_hinweis": "31.07.2025 (ohne Berater; mit Berater 30.04.2026)",
         "abgabefrist_datum": "2025-07-31",
         "soli_freigrenze_einzel": 18130, "soli_freigrenze_zusammen": 36260,
+        "kleinunternehmer_grenze_vorjahr": 22000,   # § 19 UStG, bis 2024
+        "kleinunternehmer_grenze_laufend": 50000,
+        "gewerbesteuer_freibetrag": 24500,          # § 11 Abs. 1 GewStG
         # § 32a EStG Tarifformel 2024 (für Schätzungen; jährlich prüfen!)
         "tarif": {"gfb": 11784, "z2_ende": 17005, "z3_ende": 66760,
                   "z4_ende": 277825, "z2": (954.80, 1400),
@@ -55,6 +58,9 @@ TAX_YEARS = {
         "abgabefrist_hinweis": "31.07.2026 (ohne Berater; mit Berater 30.04.2027)",
         "abgabefrist_datum": "2026-07-31",
         "soli_freigrenze_einzel": 19950, "soli_freigrenze_zusammen": 39900,
+        "kleinunternehmer_grenze_vorjahr": 25000,   # § 19 UStG, ab 2025 (JStG 2024)
+        "kleinunternehmer_grenze_laufend": 100000,
+        "gewerbesteuer_freibetrag": 24500,          # § 11 Abs. 1 GewStG
         # § 32a EStG Tarifformel 2025 (für Schätzungen; jährlich prüfen!)
         "tarif": {"gfb": 12096, "z2_ende": 17443, "z3_ende": 68480,
                   "z4_ende": 277825, "z2": (932.30, 1400),
